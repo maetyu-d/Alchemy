@@ -109,6 +109,10 @@ score.clear();
 tempo(120);
 meter(4, 4);
 state.add("Intro", 16, 4);
+state.add("Verse A", 12, 4);
+state.add("Verse B", 12, 4);
+state.connect(1, 2, 50);
+state.connect(1, 3, 50);
 track.add(1, "Lead", "chuck");
 track.gain(1, 1, 0.7);
 play();
@@ -126,7 +130,7 @@ for (0 => int i; i < 4; i++)
 stop();
 ```
 
-Supported score calls include `score.clear()`, `tempo(bpm)`, `meter(numerator, denominator)`, `phase(beats)`, `play()`, `stop()`, `mixer(visible)`, `state.add(name, durationBeats, tailBeats)`, `state.remove(index)`, `state.name(index, name)`, `state.duration(index, beats)`, `state.tail(index, beats)`, `state.select(index)`, `track.add(stateIndex, name, language)`, `track.remove(stateIndex, trackIndex)`, `track.name(...)`, `track.language(...)`, `track.gain(...)`, `track.mute(...)`, `track.solo(...)`, `track.sync(...)`, `track.tempo(...)`, `track.meter(...)`, `track.phase(...)`, `track.code(...)`, `track.template(...)`, and `track.clear(...)`.
+Supported score calls include `score.clear()`, `tempo(bpm)`, `meter(numerator, denominator)`, `phase(beats)`, `play()`, `stop()`, `mixer(visible)`, `state.add(name, durationBeats, tailBeats)`, `state.remove(index)`, `state.name(index, name)`, `state.duration(index, beats)`, `state.tail(index, beats)`, `state.select(index)`, `state.connect(fromState, toState, weight)`, `state.disconnect(fromState, toState)`, `state.clearConnections(stateIndex)`, `track.add(stateIndex, name, language)`, `track.remove(stateIndex, trackIndex)`, `track.name(...)`, `track.language(...)`, `track.gain(...)`, `track.mute(...)`, `track.solo(...)`, `track.sync(...)`, `track.tempo(...)`, `track.meter(...)`, `track.phase(...)`, `track.code(...)`, `track.template(...)`, and `track.clear(...)`. Transition weights are relative, so `50/50`, `1/1`, and `0.5/0.5` describe the same branch probability.
 
 To audition the multi-state performance path through the default output device:
 

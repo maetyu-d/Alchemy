@@ -78,6 +78,9 @@ class StateApi
     }
 
     fun void select(float stateIndex) { weldSend(15, stateIndex, 0, 0, 0, 0, 0); }
+    fun void connect(float fromStateIndex, float toStateIndex, float weight) { weldSend(16, fromStateIndex, toStateIndex, weight, 0, 0, 0); }
+    fun void disconnect(float fromStateIndex, float toStateIndex) { weldSend(17, fromStateIndex, toStateIndex, 0, 0, 0, 0); }
+    fun void clearConnections(float stateIndex) { weldSend(18, stateIndex, 0, 0, 0, 0, 0); }
 }
 
 class TrackApi

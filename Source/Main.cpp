@@ -1535,6 +1535,8 @@ tempo(120);
 meter(4, 4);
 phase(0.25);
 state.add("Intro", 16, 4);
+state.add("Alt", 8, 2);
+state.connect(1, 2, 50);
 track.add(1, "Lead", "chuck");
 track.gain(1, 1, 0.7);
 track.mute(1, 1, 0);
@@ -1615,6 +1617,8 @@ stop();
         static_cast<int> (ChucKScoreScript::CommandId::meter),
         static_cast<int> (ChucKScoreScript::CommandId::phase),
         static_cast<int> (ChucKScoreScript::CommandId::stateAdd),
+        static_cast<int> (ChucKScoreScript::CommandId::stateAdd),
+        static_cast<int> (ChucKScoreScript::CommandId::stateConnect),
         static_cast<int> (ChucKScoreScript::CommandId::trackAdd),
         static_cast<int> (ChucKScoreScript::CommandId::trackGain),
         static_cast<int> (ChucKScoreScript::CommandId::trackMute),
@@ -1633,16 +1637,20 @@ stop();
     }
 
     if (textByCommand[4][0] != "Intro"
-        || argsByCommand[5][0] != 1.0f
-        || textByCommand[5][0] != "Lead"
-        || textByCommand[5][1] != "chuck"
-        || ! valuesAreClose (argsByCommand[6][2], 0.7f)
-        || textByCommand[9][0] != "base64:U2luT3NjIHMgPT4gZGFjOwo="
-        || ! valuesAreClose (argsByCommand[10][2], 0.5f)
-        || framesByCommand[10] != 96000)
+        || textByCommand[5][0] != "Alt"
+        || argsByCommand[6][0] != 1.0f
+        || argsByCommand[6][1] != 2.0f
+        || ! valuesAreClose (argsByCommand[6][2], 50.0f)
+        || argsByCommand[7][0] != 1.0f
+        || textByCommand[7][0] != "Lead"
+        || textByCommand[7][1] != "chuck"
+        || ! valuesAreClose (argsByCommand[8][2], 0.7f)
+        || textByCommand[11][0] != "base64:U2luT3NjIHMgPT4gZGFjOwo="
+        || ! valuesAreClose (argsByCommand[12][2], 0.5f)
+        || framesByCommand[12] != 96000)
     {
         juce::Logger::writeToLog ("Score-script test failed: bridged arguments are wrong; phaseFrame="
-                                  + juce::String (framesByCommand[10]));
+                                  + juce::String (framesByCommand[12]));
         return 215;
     }
 

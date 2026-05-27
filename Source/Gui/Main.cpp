@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <memory>
+#include <random>
 #include <vector>
 
 namespace
@@ -35,6 +36,12 @@ struct TrackModel
     std::vector<EmbeddedPerformanceEngine::TrackGainEvent> gainEvents;
 };
 
+struct StateTransitionModel
+{
+    int targetStateIndex = -1;
+    double weight = 1.0;
+};
+
 struct StateModel
 {
     juce::String name;
@@ -42,6 +49,7 @@ struct StateModel
     double tailBeats = 4.0;
     int canvasX = 0;
     int canvasY = 0;
+    std::vector<StateTransitionModel> transitions;
     std::vector<TrackModel> tracks;
 };
 
@@ -56,6 +64,7 @@ struct ProjectModel
     std::vector<EmbeddedPerformanceEngine::TimeSignatureEvent> timeSignatureMap;
     std::vector<EmbeddedPerformanceEngine::PhaseRotationEvent> phaseRotationMap;
     double scheduledStopBeat = -1.0;
+    std::vector<int> arrangementOrder;
     std::vector<StateModel> states;
 };
 
@@ -116,12 +125,46 @@ double oneBarBeats (const ProjectModel& project) noexcept
     return juce::jmax (1, project.globalTimeSigNumerator) * (4.0 / juce::jmax (1, project.globalTimeSigDenominator));
 }
 
+std::vector<int> defaultArrangementOrder (const ProjectModel& project)
+{
+    std::vector<int> order;
+    order.reserve (project.states.size());
+
+    for (int i = 0; i < static_cast<int> (project.states.size()); ++i)
+        order.push_back (i);
+
+    return order;
+}
+
+std::vector<int> playableArrangementOrder (const ProjectModel& project)
+{
+    if (project.arrangementOrder.empty())
+        return defaultArrangementOrder (project);
+
+    std::vector<int> order;
+    order.reserve (project.arrangementOrder.size());
+    for (const auto stateIndex : project.arrangementOrder)
+        if (stateIndex >= 0 && stateIndex < static_cast<int> (project.states.size()))
+            order.push_back (stateIndex);
+
+    return order.empty() ? defaultArrangementOrder (project) : order;
+}
+
 double totalDurationBeats (const ProjectModel& project) noexcept
 {
     double total = 0.0;
 
-    for (const auto& state : project.states)
-        total += juce::jmax (0.0, state.durationBeats);
+    if (project.arrangementOrder.empty())
+    {
+        for (const auto& state : project.states)
+            total += juce::jmax (0.0, state.durationBeats);
+    }
+    else
+    {
+        for (const auto stateIndex : project.arrangementOrder)
+            if (stateIndex >= 0 && stateIndex < static_cast<int> (project.states.size()))
+                total += juce::jmax (0.0, project.states[static_cast<size_t> (stateIndex)].durationBeats);
+    }
 
     if (project.scheduledStopBeat >= 0.0)
         return juce::jmin (total, project.scheduledStopBeat);
@@ -153,6 +196,85 @@ float effectiveTrackGain (const ProjectModel& project, int stateIndex, int track
         return 0.0f;
 
     return juce::jlimit (0.0f, 4.0f, track.level);
+}
+
+std::vector<int> resolveProbabilisticArrangement (const ProjectModel& project)
+{
+    std::vector<int> order;
+    if (project.states.empty())
+        return order;
+
+    std::mt19937 rng (std::random_device{}());
+    constexpr int maximumResolvedStateVisits = 64;
+    const auto hasExplicitTransitions = std::any_of (project.states.begin(),
+                                                     project.states.end(),
+                                                     [] (const StateModel& state)
+                                                     {
+                                                         return ! state.transitions.empty();
+                                                     });
+    auto stateIndex = 0;
+
+    for (int visit = 0; visit < maximumResolvedStateVisits; ++visit)
+    {
+        if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+            break;
+
+        order.push_back (stateIndex);
+        const auto& transitions = project.states[static_cast<size_t> (stateIndex)].transitions;
+
+        if (transitions.empty())
+        {
+            if (hasExplicitTransitions)
+                break;
+
+            const auto nextState = stateIndex + 1;
+            if (nextState >= static_cast<int> (project.states.size()))
+                break;
+
+            stateIndex = nextState;
+            continue;
+        }
+
+        auto totalWeight = 0.0;
+        for (const auto& transition : transitions)
+            if (transition.targetStateIndex >= 0
+                && transition.targetStateIndex < static_cast<int> (project.states.size())
+                && transition.weight > 0.0
+                && std::isfinite (transition.weight))
+                totalWeight += transition.weight;
+
+        if (totalWeight <= 0.0)
+            break;
+
+        std::uniform_real_distribution<double> distribution (0.0, totalWeight);
+        auto roll = distribution (rng);
+        auto selectedState = -1;
+        auto lastValidState = -1;
+
+        for (const auto& transition : transitions)
+        {
+            if (transition.targetStateIndex < 0
+                || transition.targetStateIndex >= static_cast<int> (project.states.size())
+                || transition.weight <= 0.0
+                || ! std::isfinite (transition.weight))
+                continue;
+
+            lastValidState = transition.targetStateIndex;
+            roll -= transition.weight;
+            if (roll <= 0.0)
+            {
+                selectedState = transition.targetStateIndex;
+                break;
+            }
+        }
+
+        if (selectedState < 0)
+            selectedState = lastValidState;
+
+        stateIndex = selectedState;
+    }
+
+    return order;
 }
 
 int meterIdFor (int numerator, int denominator) noexcept
@@ -214,6 +336,8 @@ juce::String defaultChucKScoreScript()
            "state.add(\"State 3\", 20, 4);\n"
            "track.add(3, \"RTcmix bass\", \"rtcmix\");\n"
            "track.gain(3, 1, 0.65);\n"
+           "state.connect(1, 2, 1.0);\n"
+           "state.connect(2, 3, 1.0);\n"
            "play();\n";
 }
 
@@ -289,6 +413,21 @@ juce::String generateChucKScoreScript (const ProjectModel& project)
         }
 
         script << "\n";
+    }
+
+    for (size_t stateIndex = 0; stateIndex < project.states.size(); ++stateIndex)
+    {
+        const auto stateNumber = static_cast<int> (stateIndex) + 1;
+        for (const auto& transition : project.states[stateIndex].transitions)
+            if (transition.targetStateIndex >= 0
+                && transition.targetStateIndex < static_cast<int> (project.states.size())
+                && transition.weight > 0.0
+                && std::isfinite (transition.weight))
+            {
+                script << "state.connect(" << stateNumber
+                       << ", " << (transition.targetStateIndex + 1)
+                       << ", " << juce::String (transition.weight, 3) << ");\n";
+            }
     }
 
     script << "play();\n";
@@ -499,6 +638,9 @@ ProjectModel makeInitialProject()
     project.states.push_back (std::move (chuck));
     project.states.push_back (std::move (sc));
     project.states.push_back (std::move (rtcmix));
+    project.states[0].transitions.push_back ({ 1, 1.0 });
+    project.states[1].transitions.push_back ({ 2, 1.0 });
+    project.arrangementOrder = defaultArrangementOrder (project);
     return project;
 }
 
@@ -692,17 +834,54 @@ public:
             nodes.push_back ({ x, y, nodeWidth, nodeHeight });
         }
 
-        for (size_t i = 1; i < nodes.size(); ++i)
-            drawPatchCord (g, nodes[i - 1].getRight(), nodes[i - 1].getCentreY(), nodes[i].getX(), nodes[i].getCentreY());
+        auto drewExplicitConnection = false;
+        for (size_t i = 0; i < project.states.size(); ++i)
+        {
+            const auto& state = project.states[i];
+            auto totalWeight = 0.0;
+            for (const auto& transition : state.transitions)
+                if (transition.targetStateIndex >= 0
+                    && transition.targetStateIndex < static_cast<int> (nodes.size())
+                    && transition.weight > 0.0
+                    && std::isfinite (transition.weight))
+                    totalWeight += transition.weight;
+
+            for (const auto& transition : state.transitions)
+            {
+                if (transition.targetStateIndex < 0
+                    || transition.targetStateIndex >= static_cast<int> (nodes.size())
+                    || transition.weight <= 0.0
+                    || ! std::isfinite (transition.weight))
+                    continue;
+
+                const auto probability = totalWeight > 0.0 ? transition.weight / totalWeight : transition.weight;
+                drawPatchCord (g,
+                               nodes[i].getRight(),
+                               nodes[i].getCentreY(),
+                               nodes[static_cast<size_t> (transition.targetStateIndex)].getX(),
+                               nodes[static_cast<size_t> (transition.targetStateIndex)].getCentreY(),
+                               probability);
+                drewExplicitConnection = true;
+            }
+        }
+
+        if (! drewExplicitConnection)
+            for (size_t i = 1; i < nodes.size(); ++i)
+                drawPatchCord (g, nodes[i - 1].getRight(), nodes[i - 1].getCentreY(), nodes[i].getX(), nodes[i].getCentreY(), 1.0);
 
         for (size_t i = 0; i < project.states.size(); ++i)
             drawStateNode (g, project.states[i], nodes[i], static_cast<int> (i), static_cast<int> (i) == selectedStateIndex);
 
-        auto x = timeline.getX();
         double stateStart = 0.0;
-        for (const auto& state : project.states)
+        const auto order = playableArrangementOrder (project);
+        for (const auto stateIndex : order)
         {
+            if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+                continue;
+
+            const auto& state = project.states[static_cast<size_t> (stateIndex)];
             const auto stateWidth = juce::jmax (28, juce::roundToInt (timeline.getWidth() * state.durationBeats / totalBeats));
+            const auto x = timeline.getX() + juce::roundToInt (timeline.getWidth() * stateStart / totalBeats);
             auto block = juce::Rectangle<int> (x, timeline.getY(), stateWidth - 2, timeline.getHeight());
             const auto base = languageColour (state.tracks.empty() ? Language::chuck : state.tracks.front().language);
             g.setColour (base.withAlpha (0.28f));
@@ -714,7 +893,6 @@ public:
                 drawProgressLine (g, timeline, currentBeat / totalBeats);
 
             stateStart += state.durationBeats;
-            x += stateWidth;
         }
 
         if (isCountingIn)
@@ -792,7 +970,7 @@ private:
         g.drawRect (area);
     }
 
-    static void drawPatchCord (juce::Graphics& g, int x1, int y1, int x2, int y2)
+    static void drawPatchCord (juce::Graphics& g, int x1, int y1, int x2, int y2, double weight)
     {
         juce::Path cord;
         cord.startNewSubPath (static_cast<float> (x1), static_cast<float> (y1));
@@ -806,6 +984,19 @@ private:
 
         g.setColour (juce::Colour (0xffcfd8d3).withAlpha (0.72f));
         g.strokePath (cord, juce::PathStrokeType (2.0f));
+
+        if (std::abs (weight - 1.0) > 0.001)
+        {
+            const auto label = juce::String (juce::roundToInt (weight * 100.0)) + "%";
+            const auto labelX = (x1 + x2) / 2 - 18;
+            const auto labelY = (y1 + y2) / 2 - 22;
+            auto labelBounds = juce::Rectangle<int> (labelX, labelY, 36, 18);
+            g.setColour (juce::Colour (0xff101211).withAlpha (0.92f));
+            g.fillRect (labelBounds);
+            g.setColour (juce::Colour (0xfffff0a8));
+            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+            g.drawText (label, labelBounds, juce::Justification::centred, true);
+        }
     }
 
     static void drawStateNode (juce::Graphics& g, const StateModel& state, juce::Rectangle<int> node, int index, bool selected)
@@ -1131,9 +1322,14 @@ public:
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
         auto timeline = area.removeFromTop (juce::jmax (80, area.getHeight() / 4));
         auto stateStartBeat = 0.0;
+        const auto order = playableArrangementOrder (project);
 
-        for (const auto& state : project.states)
+        for (const auto stateIndex : order)
         {
+            if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+                continue;
+
+            const auto& state = project.states[static_cast<size_t> (stateIndex)];
             const auto startX = beatToX (timeline, stateStartBeat, totalBeats);
             const auto endX = beatToX (timeline, stateStartBeat + state.durationBeats, totalBeats);
             auto block = juce::Rectangle<int> (startX, timeline.getY(), juce::jmax (1, endX - startX - 4), timeline.getHeight());
@@ -1176,16 +1372,22 @@ private:
 
     void drawTrackLanes (juce::Graphics& g, juce::Rectangle<int> area)
     {
+        const auto order = playableArrangementOrder (project);
         int laneCount = 0;
-        for (const auto& state : project.states)
-            laneCount += static_cast<int> (state.tracks.size());
+        for (const auto stateIndex : order)
+            if (stateIndex >= 0 && stateIndex < static_cast<int> (project.states.size()))
+                laneCount += static_cast<int> (project.states[static_cast<size_t> (stateIndex)].tracks.size());
 
         const auto laneHeight = juce::jmax (28, area.getHeight() / juce::jmax (1, laneCount));
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
 
         auto stateStartBeat = 0.0;
-        for (const auto& state : project.states)
+        for (const auto stateIndex : order)
         {
+            if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+                continue;
+
+            const auto& state = project.states[static_cast<size_t> (stateIndex)];
             for (const auto& track : state.tracks)
             {
                 auto lane = area.removeFromTop (laneHeight).reduced (0, 3);
@@ -1582,8 +1784,12 @@ private:
         std::vector<EmbeddedPerformanceEngine::State> sequence;
         sequence.reserve (pendingProject.states.size());
 
-        for (int stateIndex = 0; stateIndex < static_cast<int> (pendingProject.states.size()); ++stateIndex)
+        const auto order = playableArrangementOrder (pendingProject);
+        for (const auto stateIndex : order)
         {
+            if (stateIndex < 0 || stateIndex >= static_cast<int> (pendingProject.states.size()))
+                continue;
+
             const auto& state = pendingProject.states[static_cast<size_t> (stateIndex)];
             EmbeddedPerformanceEngine::State performanceState;
             performanceState.name = state.name;
@@ -1891,7 +2097,13 @@ private:
             state.name = std::move (name);
         state.durationBeats = juce::jlimit (1.0, 256.0, durationBeats);
         state.tailBeats = juce::jlimit (0.0, 64.0, tailBeats);
+        const auto newStateIndex = static_cast<int> (project.states.size());
+        if (includeDefaultTrack
+            && newStateIndex > 0
+            && project.states[static_cast<size_t> (newStateIndex - 1)].transitions.empty())
+            project.states[static_cast<size_t> (newStateIndex - 1)].transitions.push_back ({ newStateIndex, 1.0 });
         project.states.push_back (std::move (state));
+        project.arrangementOrder = defaultArrangementOrder (project);
         refreshStructure (static_cast<int> (project.states.size()) - 1);
         return true;
     }
@@ -1912,6 +2124,22 @@ private:
 
         quietTransportForStructureEdit();
         project.states.erase (project.states.begin() + index);
+        for (auto& state : project.states)
+        {
+            state.transitions.erase (std::remove_if (state.transitions.begin(),
+                                                     state.transitions.end(),
+                                                     [index] (const StateTransitionModel& transition)
+                                                     {
+                                                         return transition.targetStateIndex == index;
+                                                     }),
+                                     state.transitions.end());
+
+            for (auto& transition : state.transitions)
+                if (transition.targetStateIndex > index)
+                    --transition.targetStateIndex;
+        }
+
+        project.arrangementOrder = defaultArrangementOrder (project);
         refreshStructure (juce::jlimit (0, static_cast<int> (project.states.size()) - 1, index));
         return true;
     }
@@ -2015,6 +2243,7 @@ private:
         playing = false;
         countInBeat = 0.0;
         currentBeat = 0.0;
+        project.arrangementOrder = resolveProbabilisticArrangement (project);
         audio.loadProject (project);
         currentView = BottomView::arrangement;
         layoutBottomView();
@@ -2450,6 +2679,7 @@ private:
                 project.timeSignatureMap.clear();
                 project.phaseRotationMap.clear();
                 project.scheduledStopBeat = -1.0;
+                project.arrangementOrder.clear();
                 refreshStructure (0);
                 break;
 
@@ -2526,6 +2756,69 @@ private:
             case ScoreCommandId::stateSelect:
                 selectState (stateIndex (args[0]));
                 break;
+
+            case ScoreCommandId::stateConnect:
+            {
+                const auto from = stateIndex (args[0]);
+                const auto to = stateIndex (args[1]);
+                if (from >= 0 && from < static_cast<int> (project.states.size())
+                    && to >= 0 && to < static_cast<int> (project.states.size())
+                    && args[2] > 0.0
+                    && std::isfinite (args[2]))
+                {
+                    auto& transitions = project.states[static_cast<size_t> (from)].transitions;
+                    auto existing = std::find_if (transitions.begin(),
+                                                  transitions.end(),
+                                                  [to] (const StateTransitionModel& transition)
+                                                  {
+                                                      return transition.targetStateIndex == to;
+                                                  });
+
+                    if (existing != transitions.end())
+                        existing->weight = args[2];
+                    else
+                        transitions.push_back ({ to, args[2] });
+
+                    project.arrangementOrder = defaultArrangementOrder (project);
+                    score.repaint();
+                    arrangement.repaint();
+                }
+                break;
+            }
+
+            case ScoreCommandId::stateDisconnect:
+            {
+                const auto from = stateIndex (args[0]);
+                const auto to = stateIndex (args[1]);
+                if (from >= 0 && from < static_cast<int> (project.states.size()))
+                {
+                    auto& transitions = project.states[static_cast<size_t> (from)].transitions;
+                    transitions.erase (std::remove_if (transitions.begin(),
+                                                       transitions.end(),
+                                                       [to] (const StateTransitionModel& transition)
+                                                       {
+                                                           return transition.targetStateIndex == to;
+                                                       }),
+                                       transitions.end());
+                    project.arrangementOrder = defaultArrangementOrder (project);
+                    score.repaint();
+                    arrangement.repaint();
+                }
+                break;
+            }
+
+            case ScoreCommandId::stateClearConnections:
+            {
+                const auto index = stateIndex (args[0]);
+                if (index >= 0 && index < static_cast<int> (project.states.size()))
+                {
+                    project.states[static_cast<size_t> (index)].transitions.clear();
+                    project.arrangementOrder = defaultArrangementOrder (project);
+                    score.repaint();
+                    arrangement.repaint();
+                }
+                break;
+            }
 
             case ScoreCommandId::trackAdd:
                 static_cast<void> (addTrackFromCommand (stateIndex (args[0]),

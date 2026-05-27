@@ -583,6 +583,12 @@ juce::String EmbeddedPerformanceEngine::getLastError() const
     return lastError;
 }
 
+double EmbeddedPerformanceEngine::getCurrentBeat() const
+{
+    const juce::ScopedLock lock (engineLock);
+    return frameToBeatUnlocked (playheadFrame);
+}
+
 double EmbeddedPerformanceEngine::secondsToBeats (double seconds, double bpm) noexcept
 {
     if (seconds <= 0.0 || bpm <= 0.0 || ! std::isfinite (seconds) || ! std::isfinite (bpm))

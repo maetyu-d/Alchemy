@@ -1416,6 +1416,18 @@ public:
         return lastError;
     }
 
+    bool isPlaying() const
+    {
+        const juce::ScopedLock lock (engineLock);
+        return performance.isPlaying();
+    }
+
+    double getCurrentBeat() const
+    {
+        const juce::ScopedLock lock (engineLock);
+        return performance.getCurrentBeat();
+    }
+
     void audioDeviceAboutToStart (juce::AudioIODevice* device) override
     {
         const juce::ScopedLock lock (engineLock);
@@ -1937,12 +1949,13 @@ private:
         }
         else if (playing)
         {
-            currentBeat += deltaBeats;
+            currentBeat = audio.getCurrentBeat();
+            playing = audio.isPlaying();
 
-            if (currentBeat >= totalDurationBeats (project))
+            if (! playing || currentBeat >= totalDurationBeats (project))
             {
                 playing = false;
-                currentBeat = totalDurationBeats (project);
+                currentBeat = juce::jmin (currentBeat, totalDurationBeats (project));
             }
         }
 

@@ -97,6 +97,7 @@ public:
     bool isPlaying() const noexcept { return playing.load (std::memory_order_acquire); }
     int getCurrentStateIndex() const noexcept { return currentStateIndex.load (std::memory_order_acquire); }
     int getActiveStateCount() const noexcept { return activeStateCount.load (std::memory_order_acquire); }
+    double getCurrentBeat() const;
     uint64_t getRenderedFrameCount() const noexcept { return renderedFrameCount.load (std::memory_order_relaxed); }
     uint64_t getSilentProcessCount() const noexcept { return silentProcessCount.load (std::memory_order_relaxed); }
     uint64_t getOversizedBlockCount() const noexcept { return oversizedBlockCount.load (std::memory_order_relaxed); }

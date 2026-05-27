@@ -739,6 +739,34 @@ float EmbeddedChucKEngine::getParameterValue (int index) const noexcept
     return parameterSlots[static_cast<size_t> (index)].value.load (std::memory_order_relaxed);
 }
 
+void EmbeddedChucKEngine::pullParameterValuesFromGlobals() noexcept
+{
+    const juce::ScopedLock lock (engineLock);
+    const auto count = activeParameterCount.load (std::memory_order_acquire);
+
+    for (int i = 0; i < count && i < maximumParameterCount; ++i)
+    {
+        auto& slot = parameterSlots[static_cast<size_t> (i)];
+        if (slot.globalPointer != nullptr)
+            slot.value.store (static_cast<float> (*slot.globalPointer), std::memory_order_relaxed);
+    }
+}
+
+juce::String EmbeddedChucKEngine::getGlobalStringValue (const juce::String& name) const
+{
+    const juce::ScopedLock lock (engineLock);
+
+    if (! ready.load (std::memory_order_acquire) || chuck == nullptr || name.isEmpty())
+        return {};
+
+    auto* globals = chuck->globals();
+    if (globals == nullptr)
+        return {};
+
+    auto* value = globals->get_global_string (name.toStdString());
+    return value != nullptr ? juce::String (value->c_str()) : juce::String();
+}
+
 int EmbeddedChucKEngine::getParameterIndex (const juce::String& name) const
 {
     const juce::ScopedLock lock (engineLock);

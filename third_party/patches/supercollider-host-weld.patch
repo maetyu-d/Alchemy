@@ -1,0 +1,481 @@
+diff --git a/common/SC_ReplyImpl.hpp b/common/SC_ReplyImpl.hpp
+index 2ec6fe5..d1c0e09 100644
+--- a/common/SC_ReplyImpl.hpp
++++ b/common/SC_ReplyImpl.hpp
+@@ -44,5 +44,8 @@ bool operator==(const ReplyAddress& a, const ReplyAddress& b);
+ bool operator<(const ReplyAddress& a, const ReplyAddress& b);
+ 
+ inline void SendReply(struct ReplyAddress* inReplyAddr, char* inBuf, int inSize) {
++    if (inReplyAddr == nullptr || inReplyAddr->mReplyFunc == nullptr)
++        return;
++
+     (inReplyAddr->mReplyFunc)(inReplyAddr, inBuf, inSize);
+ }
+diff --git a/include/server/SC_WorldOptions.h b/include/server/SC_WorldOptions.h
+index f49c8b5..f70b274 100644
+--- a/include/server/SC_WorldOptions.h
++++ b/include/server/SC_WorldOptions.h
+@@ -115,6 +115,9 @@ SCSYNTH_DLLEXPORT_C void World_WaitForQuit(World* inWorld, bool unload_plugins =
+ SCSYNTH_DLLEXPORT_C bool World_SendPacket(World* inWorld, int inSize, char* inData, ReplyFunc inFunc);
+ SCSYNTH_DLLEXPORT_C bool World_SendPacketWithContext(World* inWorld, int inSize, char* inData, ReplyFunc inFunc,
+                                                      void* inContext);
++SCSYNTH_DLLEXPORT_C bool World_RenderHostAudio(World* inWorld, const float* inInterleavedInput,
++                                               float* outInterleavedOutput, int inFrames, int inInputChannels,
++                                               int inOutputChannels);
+ SCSYNTH_DLLEXPORT_C int World_CopySndBuf(World* world, uint32 index, struct SndBuf* outBuf, bool onlyIfChanged,
+                                          bool* didChange);
+ SCSYNTH_DLLEXPORT_C int scprintf(const char* fmt, ...);
+diff --git a/lang/CMakeLists.txt b/lang/CMakeLists.txt
+index 7736645..ecfa5ca 100644
+--- a/lang/CMakeLists.txt
++++ b/lang/CMakeLists.txt
+@@ -110,7 +110,7 @@ if(AUDIOAPI STREQUAL "default")
+     endif(APPLE)
+ endif()
+ 
+-if(NOT AUDIOAPI MATCHES "^(jack|coreaudio|portaudio|bela)$")
++if(NOT AUDIOAPI MATCHES "^(jack|coreaudio|portaudio|bela|host)$")
+     message(FATAL_ERROR "Unrecognised audio API: ${AUDIOAPI}")
+ endif()
+ 
+@@ -292,6 +292,7 @@ if (APPLE)
+ 	target_link_libraries(libsclang "-framework CoreAudio")
+ 	target_link_libraries(libsclang "-framework CoreMIDI")
+ 	target_link_libraries(libsclang "-framework CoreServices")
++	target_link_libraries(libsclang "-framework Foundation")
+ 	target_link_libraries(libsclang "-framework IOKit")
+ 	target_link_libraries(libsclang "-framework CoreFoundation")
+ endif()
+@@ -346,6 +347,22 @@ endif()
+ 
+ target_link_libraries(libsclang yaml-cpp)
+ 
++add_library(weldsclang SHARED LangSource/SC_WeldLangBridge.cpp)
++target_include_directories(weldsclang PRIVATE
++    ${CMAKE_SOURCE_DIR}/include/common
++    ${CMAKE_SOURCE_DIR}/include/lang
++    ${CMAKE_SOURCE_DIR}/common
++    LangSource
++    LangPrimSource)
++target_link_libraries(weldsclang PRIVATE libsclang ${ICU_LIBRARIES})
++if(APPLE)
++    target_link_libraries(weldsclang PRIVATE "-framework Foundation")
++endif()
++set_target_properties(weldsclang PROPERTIES
++    OUTPUT_NAME weldsclang
++    CXX_VISIBILITY_PRESET hidden
++    VISIBILITY_INLINES_HIDDEN YES)
++
+ add_executable(sclang LangSource/cmdLineFuncs.cpp ${RES_FILES})
+ target_link_libraries(sclang libsclang)
+ target_link_libraries(sclang ${ICU_LIBRARIES})
+diff --git a/lang/LangSource/SC_WeldLangBridge.cpp b/lang/LangSource/SC_WeldLangBridge.cpp
+new file mode 100644
+index 0000000..c2b064c
+--- /dev/null
++++ b/lang/LangSource/SC_WeldLangBridge.cpp
+@@ -0,0 +1,194 @@
++#include "SC_LanguageClient.h"
++#include "SC_LanguageConfig.hpp"
++
++#include <cstdio>
++#include <cstring>
++#include <mutex>
++#include <string>
++
++namespace {
++class WeldLanguageClient final : public SC_LanguageClient {
++public:
++    explicit WeldLanguageClient(const char* name): SC_LanguageClient(name != nullptr ? name : "weld-sclang") {}
++
++    void postText(const char* str, size_t len) override { append(str, len); }
++    void postFlush(const char* str, size_t len) override { append(str, len); }
++    void postError(const char* str, size_t len) override { append(str, len); }
++    void flush() override {}
++
++    void clearPostBuffer() { postBuffer.clear(); }
++    const std::string& getPostBuffer() const { return postBuffer; }
++
++private:
++    void append(const char* str, size_t len)
++    {
++        if (str != nullptr && len > 0)
++            postBuffer.append(str, len);
++    }
++
++    std::string postBuffer;
++};
++
++std::mutex& bridgeMutex()
++{
++    static std::mutex mutex;
++    return mutex;
++}
++
++SC_LanguageClient*& bridgeClient()
++{
++    static SC_LanguageClient* client = nullptr;
++    return client;
++}
++
++bool& bridgeCompiled()
++{
++    static bool compiled = false;
++    return compiled;
++}
++
++void setError(char* buffer, int bufferSize, const char* message)
++{
++    if (buffer == nullptr || bufferSize <= 0)
++        return;
++
++    std::snprintf(buffer, static_cast<size_t>(bufferSize), "%s", message != nullptr ? message : "");
++}
++
++std::string escapeSCString(const char* text)
++{
++    std::string result;
++    if (text == nullptr)
++        return result;
++
++    for (const char* p = text; *p != '\0'; ++p) {
++        if (*p == '\\' || *p == '"')
++            result.push_back('\\');
++        result.push_back(*p);
++    }
++
++    return result;
++}
++}
++
++extern "C" __attribute__((visibility("default"))) bool WeldSCLang_Initialise(const char* runtimeDirectory,
++                                                                              char* errorBuffer,
++                                                                              int errorBufferSize)
++{
++    std::lock_guard<std::mutex> lock(bridgeMutex());
++
++    if (bridgeCompiled())
++        return true;
++
++    if (bridgeClient() == nullptr) {
++        bridgeClient() = new WeldLanguageClient("weld-sclang");
++        if (bridgeClient() == nullptr) {
++            setError(errorBuffer, errorBufferSize, "could not create embedded sclang client");
++            return false;
++        }
++
++        SC_LanguageClient::Options options;
++        if (runtimeDirectory != nullptr)
++            options.mRuntimeDir = runtimeDirectory;
++        options.mPort = 0;
++        bridgeClient()->initRuntime(options);
++    }
++
++    SC_LanguageConfig::defaultLibraryConfig(true);
++    if (runtimeDirectory != nullptr) {
++        std::string classLibraryPath = std::string(runtimeDirectory) + "/SCClassLibrary";
++        gLanguageConfig->addIncludedDirectory(classLibraryPath);
++    }
++
++    bridgeClient()->compileLibrary(true);
++    bridgeCompiled() = bridgeClient()->isLibraryCompiled();
++
++    if (!bridgeCompiled()) {
++        setError(errorBuffer, errorBufferSize, "embedded sclang class library did not compile");
++        return false;
++    }
++
++    setError(errorBuffer, errorBufferSize, "");
++    return true;
++}
++
++extern "C" __attribute__((visibility("default"))) void WeldSCLang_Shutdown()
++{
++    std::lock_guard<std::mutex> lock(bridgeMutex());
++
++    if (bridgeClient() != nullptr) {
++        bridgeClient()->shutdownLibrary();
++        bridgeClient()->shutdownRuntime();
++        destroyLanguageClient(bridgeClient());
++        bridgeClient() = nullptr;
++    }
++
++    bridgeCompiled() = false;
++}
++
++extern "C" __attribute__((visibility("default"))) bool WeldSCLang_CompileSynthDef(const char* source,
++                                                                                   const char* outputPath,
++                                                                                   const char* synthName,
++                                                                                   char* errorBuffer,
++                                                                                   int errorBufferSize)
++{
++    std::lock_guard<std::mutex> lock(bridgeMutex());
++
++    if (bridgeClient() == nullptr || !bridgeCompiled()) {
++        setError(errorBuffer, errorBufferSize, "embedded sclang is not initialised");
++        return false;
++    }
++
++    if (source == nullptr || outputPath == nullptr || synthName == nullptr) {
++        setError(errorBuffer, errorBufferSize, "missing SuperCollider compile input");
++        return false;
++    }
++
++    std::remove(outputPath);
++    static_cast<WeldLanguageClient*>(bridgeClient())->clearPostBuffer();
++
++    const auto escapedSource = escapeSCString(source);
++    const auto escapedOutputPath = escapeSCString(outputPath);
++    const auto escapedSynthName = escapeSCString(synthName);
++
++    const std::string command =
++        "var weldSource = \"" + escapedSource + "\";\n"
++        "var weldPath = \"" + escapedOutputPath + "\";\n"
++        "var weldName = \"" + escapedSynthName + "\".asSymbol;\n"
++        "var weldCompiled, weldDef, weldFile;\n"
++        "weldCompiled = thisProcess.interpreter.compile(weldSource).value;\n"
++        "if (weldCompiled.isKindOf(SynthDef)) {\n"
++        "    weldDef = weldCompiled;\n"
++        "} {\n"
++        "    if (weldCompiled.isKindOf(Function)) {\n"
++        "        weldDef = SynthDef(weldName, { |out = 0|\n"
++        "            var weldControls, weldSignal;\n"
++        "            weldControls = SharedIn.kr(0, 3);\n"
++        "            weldSignal = weldCompiled.value(weldControls[0], weldControls[1], weldControls[2]);\n"
++        "            Out.ar(out, weldSignal.asArray.extend(2, weldSignal));\n"
++        "        });\n"
++        "    } {\n"
++        "        Error(\"Weld SuperCollider source must evaluate to a SynthDef or Function\").throw;\n"
++        "    };\n"
++        "};\n"
++        "weldFile = File(weldPath, \"w\");\n"
++        "protect { weldDef.asArray.writeDef(weldFile); } { weldFile.close; };\n";
++
++    bridgeClient()->setCmdLine(command.c_str(), command.size());
++    bridgeClient()->interpretCmdLine();
++    bridgeClient()->flush();
++
++    FILE* file = std::fopen(outputPath, "rb");
++    if (file == nullptr) {
++        const auto& postBuffer = static_cast<WeldLanguageClient*>(bridgeClient())->getPostBuffer();
++        if (!postBuffer.empty())
++            setError(errorBuffer, errorBufferSize, postBuffer.c_str());
++        else
++            setError(errorBuffer, errorBufferSize, "embedded sclang did not produce a SynthDef");
++        return false;
++    }
++
++    std::fclose(file);
++    setError(errorBuffer, errorBufferSize, "");
++    return true;
++}
+diff --git a/server/scsynth/CMakeLists.txt b/server/scsynth/CMakeLists.txt
+index d6cae54..093e867 100644
+--- a/server/scsynth/CMakeLists.txt
++++ b/server/scsynth/CMakeLists.txt
+@@ -32,7 +32,7 @@ if(AUDIOAPI STREQUAL "default")
+ 	endif(APPLE)
+ endif()
+ 
+-if(NOT AUDIOAPI MATCHES "^(jack|coreaudio|portaudio|bela)$")
++if(NOT AUDIOAPI MATCHES "^(jack|coreaudio|portaudio|bela|host)$")
+ 	message(FATAL_ERROR "Unrecognised audio API: ${AUDIOAPI}")
+ endif()
+ 
+@@ -142,6 +142,9 @@ elseif (AUDIOAPI STREQUAL bela)
+     list(APPEND scsynth_sources SC_Bela.cpp)
+     add_definitions("-DSC_AUDIO_API=SC_AUDIO_API_BELA" "-DSC_BELA" ${XENOMAI_DEFINITIONS} ${BELA_DEFINITIONS})
+     include_directories(${XENOMAI_INCLUDE_DIRS} ${BELA_INCLUDE_DIRS})
++elseif (AUDIOAPI STREQUAL host)
++    list(APPEND scsynth_sources SC_HostAudio.cpp)
++    add_definitions("-DSC_AUDIO_API=SC_AUDIO_API_HOST")
+ endif()
+ 
+ set (FINAL_BUILD 0) # disable final build for scsynth
+diff --git a/server/scsynth/SC_CoreAudio.h b/server/scsynth/SC_CoreAudio.h
+index d0afdc7..8849d8c 100644
+--- a/server/scsynth/SC_CoreAudio.h
++++ b/server/scsynth/SC_CoreAudio.h
+@@ -35,6 +35,7 @@
+ #define SC_AUDIO_API_AUDIOUNITS 4
+ #define SC_AUDIO_API_COREAUDIOIPHONE 5
+ #define SC_AUDIO_API_BELA 6
++#define SC_AUDIO_API_HOST 7
+ 
+ #ifdef SC_IPHONE
+ #    define SC_AUDIO_API SC_AUDIO_API_COREAUDIOIPHONE
+diff --git a/server/scsynth/SC_HostAudio.cpp b/server/scsynth/SC_HostAudio.cpp
+new file mode 100644
+index 0000000..ae3a1f4
+--- /dev/null
++++ b/server/scsynth/SC_HostAudio.cpp
+@@ -0,0 +1,156 @@
++/*
++    Host-pulled audio driver for embedded libscsynth use.
++    This backend does not open an audio device. The embedding host owns the
++    callback and advances scsynth by calling World_RenderHostAudio().
++*/
++
++#include "SC_CoreAudio.h"
++#include "SC_HiddenWorld.h"
++#include "SC_Prototypes.h"
++#include "SC_Time.hpp"
++#include "SC_WorldOptions.h"
++#include "SC_BoundsMacros.h"
++
++#include <algorithm>
++#include <cmath>
++#include <cstring>
++#include <stdexcept>
++
++int32 server_timeseed() {
++    return timeSeed();
++}
++
++int64 oscTimeNow() {
++    return OSCTime(getTime());
++}
++
++void initializeScheduler() {}
++
++namespace {
++class SC_HostAudioDriver final : public SC_AudioDriver {
++public:
++    explicit SC_HostAudioDriver(World* inWorld): SC_AudioDriver(inWorld) {}
++
++    bool Render(const float* input, float* output, int frames, int inputChannels, int outputChannels) {
++        if (output == nullptr || frames <= 0)
++            return false;
++
++        const int bufFrames = static_cast<int>(mWorld->mBufLength);
++        if (bufFrames <= 0 || frames % bufFrames != 0)
++            return false;
++
++        try {
++            mToEngine.Perform();
++            mOscPacketsToEngine.Perform();
++            mFromEngine.Perform();
++            mFromEngine.Free();
++
++            const int numBufs = frames / bufFrames;
++            float* inBuses = mWorld->mAudioBus + mWorld->mNumOutputs * bufFrames;
++            float* outBuses = mWorld->mAudioBus;
++            int32* inTouched = mWorld->mAudioBusTouched + mWorld->mNumOutputs;
++            int32* outTouched = mWorld->mAudioBusTouched;
++
++            const int minInputs = sc_min(inputChannels, static_cast<int>(mWorld->mNumInputs));
++            const int minOutputs = sc_min(outputChannels, static_cast<int>(mWorld->mNumOutputs));
++            const double oscToSamples = mOSCtoSamples;
++            int64 oscTime = mOSCbuftime;
++
++            std::memset(output, 0, sizeof(float) * static_cast<size_t>(frames) * static_cast<size_t>(outputChannels));
++
++            for (int buf = 0; buf < numBufs; ++buf, ++mWorld->mBufCounter) {
++                const int frameOffset = buf * bufFrames;
++                const int32 bufCounter = mWorld->mBufCounter;
++
++                if (input != nullptr && minInputs > 0) {
++                    int32* touched = inTouched;
++                    for (int channel = 0; channel < minInputs; ++channel) {
++                        float* dst = inBuses + channel * bufFrames;
++                        for (int frame = 0; frame < bufFrames; ++frame) {
++                            const float sample = input[(frameOffset + frame) * inputChannels + channel];
++                            *dst++ = std::isfinite(sample) ? sample : 0.0f;
++                        }
++                        *touched++ = bufCounter;
++                    }
++                }
++
++                const int64 nextTime = oscTime + mOSCincrement;
++                int64 schedTime;
++                while ((schedTime = mScheduler.NextTime()) <= nextTime) {
++                    const float diffTime = static_cast<float>(schedTime - oscTime) * static_cast<float>(oscToSamples) + 0.5f;
++                    const float diffTimeFloor = std::floor(diffTime);
++                    mWorld->mSampleOffset = static_cast<int>(diffTimeFloor);
++                    mWorld->mSubsampleOffset = diffTime - diffTimeFloor;
++
++                    if (mWorld->mSampleOffset < 0)
++                        mWorld->mSampleOffset = 0;
++                    else if (mWorld->mSampleOffset >= mWorld->mBufLength)
++                        mWorld->mSampleOffset = mWorld->mBufLength - 1;
++
++                    SC_ScheduledEvent event = mScheduler.Remove();
++                    event.Perform();
++                }
++
++                mWorld->mSampleOffset = 0;
++                mWorld->mSubsampleOffset = 0.0f;
++                World_Run(mWorld);
++
++                int32* touched = outTouched;
++                for (int channel = 0; channel < minOutputs; ++channel) {
++                    const float* src = outBuses + channel * bufFrames;
++                    if (*touched++ == bufCounter) {
++                        for (int frame = 0; frame < bufFrames; ++frame) {
++                            const float sample = src[frame];
++                            output[(frameOffset + frame) * outputChannels + channel] =
++                                std::isfinite(sample) ? sample : 0.0f;
++                        }
++                    }
++                }
++
++                oscTime = nextTime;
++                mOSCbuftime = nextTime;
++            }
++
++            mAudioSync.Signal();
++            return true;
++        } catch (const std::exception& exc) {
++            scprintf("SC_HostAudioDriver: exception in host render: %s\n", exc.what());
++        } catch (...) {
++            scprintf("SC_HostAudioDriver: unknown exception in host render\n");
++        }
++
++        return false;
++    }
++
++protected:
++    bool DriverSetup(int* outNumSamplesPerCallback, double* outSampleRate) override {
++        *outNumSamplesPerCallback = mPreferredHardwareBufferFrameSize > 0
++            ? static_cast<int>(mPreferredHardwareBufferFrameSize)
++            : static_cast<int>(mWorld->mBufLength);
++
++        *outSampleRate = mPreferredSampleRate > 0 ? static_cast<double>(mPreferredSampleRate) : 48000.0;
++        mHardwareBufferSize = static_cast<uint32>(*outNumSamplesPerCallback);
++        return true;
++    }
++
++    bool DriverStart() override { return true; }
++    bool DriverStop() override { return true; }
++};
++} // namespace
++
++SC_AudioDriver* SC_NewAudioDriver(World* inWorld) {
++    return new SC_HostAudioDriver(inWorld);
++}
++
++SCSYNTH_DLLEXPORT_C bool World_RenderHostAudio(World* inWorld, const float* inInterleavedInput,
++                                               float* outInterleavedOutput, int inFrames, int inInputChannels,
++                                               int inOutputChannels) {
++    if (inWorld == nullptr || inWorld->hw == nullptr || inWorld->hw->mAudioDriver == nullptr)
++        return false;
++
++    auto* driver = dynamic_cast<SC_HostAudioDriver*>(inWorld->hw->mAudioDriver);
++    if (driver == nullptr)
++        return false;
++
++    return driver->Render(inInterleavedInput, outInterleavedOutput, inFrames, inInputChannels, inOutputChannels);
++}
+diff --git a/server/scsynth/SC_World.cpp b/server/scsynth/SC_World.cpp
+index cd531cc..027ccf5 100644
+--- a/server/scsynth/SC_World.cpp
++++ b/server/scsynth/SC_World.cpp
+@@ -370,7 +370,7 @@ World* World_New(WorldOptions* inOptions) {
+             world->mControlBus = (float*)zalloc(world->mNumControlBusChannels, sizeof(float));
+         }
+ 
+-        world->mNumSharedControls = 0;
++        world->mNumSharedControls = inOptions->mNumSharedControls;
+         world->mSharedControls = inOptions->mSharedControls;
+ 
+         int numsamples = world->mBufLength * world->mNumAudioBusChannels;

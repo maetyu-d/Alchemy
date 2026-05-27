@@ -195,6 +195,267 @@ public:
     std::atomic<uint64_t> callbackExceptionCount { 0 };
 };
 
+class PerformanceAudioCallback final : public juce::AudioIODeviceCallback
+{
+public:
+    static constexpr int maxHostChannels = 16;
+    static constexpr int safetyBlockSize = 8192;
+    static constexpr int maximumHostBlockSize = EmbeddedChucKEngine::maximumBlockSizeLimit;
+    static constexpr double fallbackSampleRate = 44100.0;
+    static constexpr int engineInputChannels = 0;
+    static constexpr int engineOutputChannels = 2;
+
+    explicit PerformanceAudioCallback (bool quickDemoToUse = false)
+        : quickDemo (quickDemoToUse)
+    {
+    }
+
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override
+    {
+        const auto sampleRate = device != nullptr ? device->getCurrentSampleRate() : fallbackSampleRate;
+        const auto reportedBufferSize = device != nullptr ? device->getCurrentBufferSizeSamples() : 0;
+        prepareForDevice (sampleRate, reportedBufferSize);
+    }
+
+    bool prepareForDevice (double sampleRate, int reportedBufferSize)
+    {
+        juce::ScopedNoDenormals noDenormals;
+        deviceReady.store (false, std::memory_order_release);
+        performance.release();
+        resetScratchBuffers();
+
+        if (sampleRate <= 0.0 || ! std::isfinite (sampleRate))
+        {
+            juce::Logger::writeToLog ("Refusing invalid performance sample rate: " + juce::String (sampleRate));
+            rejectedPrepareCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        const auto bufferSize = juce::jmax (reportedBufferSize, safetyBlockSize);
+        if (bufferSize > maximumHostBlockSize)
+        {
+            juce::Logger::writeToLog ("Refusing unsupported performance block size: " + juce::String (bufferSize));
+            rejectedPrepareCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        scratchInput.setSize (juce::jmax (1, engineInputChannels), bufferSize, false, false, true);
+        scratchOutput.setSize (maxHostChannels, bufferSize, false, false, true);
+        scratchInput.clear();
+        scratchOutput.clear();
+
+        if (! performance.prepare (sampleRate, bufferSize, engineInputChannels, engineOutputChannels))
+        {
+            juce::Logger::writeToLog ("Performance prepare failed: " + performance.getLastError());
+            rejectedPrepareCount.fetch_add (1, std::memory_order_relaxed);
+            resetScratchBuffers();
+            return false;
+        }
+
+        if (! configureDemoSequence())
+        {
+            rejectedPrepareCount.fetch_add (1, std::memory_order_relaxed);
+            resetScratchBuffers();
+            return false;
+        }
+
+        successfulPrepareCount.fetch_add (1, std::memory_order_relaxed);
+        deviceReady.store (true, std::memory_order_release);
+        return true;
+    }
+
+    void audioDeviceStopped() override
+    {
+        deviceReady.store (false, std::memory_order_release);
+        performance.release();
+        resetScratchBuffers();
+    }
+
+    void audioDeviceIOCallbackWithContext (const float* const*,
+                                           int,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext&) override
+    {
+        try
+        {
+            handleAudioCallback (outputChannelData, numOutputChannels, numSamples);
+        }
+        catch (...)
+        {
+            clearHostOutputs (outputChannelData, numOutputChannels, numSamples);
+            callbackExceptionCount.fetch_add (1, std::memory_order_relaxed);
+            rejectedCallbackCount.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    bool hasFinished() const noexcept
+    {
+        return deviceReady.load (std::memory_order_acquire) && ! performance.isPlaying();
+    }
+
+private:
+    bool configureDemoSequence()
+    {
+        constexpr auto demoTempo = 120.0;
+
+        const auto chuckSource = juce::String (R"chuck(
+SinOsc left => Gain leftGain => dac.left;
+SinOsc right => Gain rightGain => dac.right;
+
+while (true)
+{
+    Math.max(40.0, hostFreq) => float f;
+    Math.max(0.0, Math.min(hostGain, 0.08)) => float g;
+
+    f => left.freq;
+    f * 1.005 => right.freq;
+    g * hostStateGain => leftGain.gain;
+    g * hostStateGain => rightGain.gain;
+
+    1::samp => now;
+}
+)chuck");
+
+        const auto superColliderSource = juce::String (R"supercollider(
+{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1|
+    var amp = gain.min(0.05) * stateGain;
+    var left = SinOsc.ar(freq) * amp;
+    var right = SinOsc.ar(freq * 1.003) * amp;
+    [left, right]
+}
+)supercollider");
+
+        const auto rtcmixScore = juce::String (R"rtcmix(
+bus_config("WAVETABLE", "out 0")
+freq = makeconnection("inlet", 1, 180)
+gain = makeconnection("inlet", 2, 0.02)
+pan = makeconnection("inlet", 3, 0.55)
+stategain = makeconnection("inlet", 5, 1.0)
+wave = maketable("wave", 4096, "sine")
+WAVETABLE(0, 3600, gain * stategain * 32767.0, freq, pan, wave)
+)rtcmix");
+
+        const auto firstDurationSeconds = quickDemo ? 6.0 : 30.0;
+        const auto secondDurationSeconds = quickDemo ? 5.0 : 20.0;
+        const auto thirdDurationSeconds = quickDemo ? 6.0 : 25.0;
+        const auto firstTailSeconds = quickDemo ? 2.0 : 8.0;
+        const auto secondTailSeconds = quickDemo ? 2.0 : 8.0;
+        const auto thirdTailSeconds = quickDemo ? 2.0 : 10.0;
+
+        std::vector<EmbeddedPerformanceEngine::State> states
+        {
+            { "state-1-chuck",
+              EmbeddedLanguageEngine::Language::chuck,
+              chuckSource,
+              EmbeddedChucKEngine::getDefaultParameterBindings(),
+              EmbeddedPerformanceEngine::secondsToBeats (firstDurationSeconds, demoTempo),
+              EmbeddedPerformanceEngine::secondsToBeats (firstTailSeconds, demoTempo),
+              {} },
+
+            { "state-2-supercollider",
+              EmbeddedLanguageEngine::Language::supercollider,
+              superColliderSource,
+              EmbeddedChucKEngine::getDefaultParameterBindings(),
+              EmbeddedPerformanceEngine::secondsToBeats (secondDurationSeconds, demoTempo),
+              EmbeddedPerformanceEngine::secondsToBeats (secondTailSeconds, demoTempo),
+              {} },
+
+            { "state-3-rtcmix",
+              EmbeddedLanguageEngine::Language::rtcmix,
+              rtcmixScore,
+              EmbeddedChucKEngine::getDefaultParameterBindings(),
+              EmbeddedPerformanceEngine::secondsToBeats (thirdDurationSeconds, demoTempo),
+              EmbeddedPerformanceEngine::secondsToBeats (thirdTailSeconds, demoTempo),
+              {} }
+        };
+
+        if (! performance.setTempoMap ({ { 0.0, demoTempo } })
+            || ! performance.setTimeSignatureMap ({ { 0.0, 4, 4 }, { 32.0, 7, 8 }, { 76.0, 3, 4 } })
+            || ! performance.setPhaseRotationMap ({ { 0.0, 0.0 }, { 32.0, 0.5 }, { 76.0, -0.25 } })
+            || ! performance.loadSequence (states)
+            || ! performance.setStateParameterValue (0, "hostFreq", 220.0f)
+            || ! performance.setStateParameterValue (0, "hostGain", 0.04f)
+            || ! performance.setStateParameterValue (0, "hostBlend", 0.50f)
+            || ! performance.setStateParameterValue (1, "hostFreq", 330.0f)
+            || ! performance.setStateParameterValue (1, "hostGain", 0.035f)
+            || ! performance.setStateParameterValue (1, "hostBlend", 0.50f)
+            || ! performance.setStateParameterValue (2, "hostFreq", 165.0f)
+            || ! performance.setStateParameterValue (2, "hostGain", 0.02f)
+            || ! performance.setStateParameterValue (2, "hostBlend", 0.50f)
+            || ! performance.start())
+        {
+            juce::Logger::writeToLog ("Performance demo setup failed: " + performance.getLastError());
+            return false;
+        }
+
+        return true;
+    }
+
+    void handleAudioCallback (float* const* outputChannelData, int numOutputChannels, int numSamples)
+    {
+        juce::ScopedNoDenormals noDenormals;
+        clearHostOutputs (outputChannelData, numOutputChannels, numSamples);
+
+        if (! deviceReady.load (std::memory_order_acquire)
+            || outputChannelData == nullptr
+            || numSamples <= 0
+            || numSamples > scratchOutput.getNumSamples()
+            || numOutputChannels <= 0
+            || numOutputChannels > scratchOutput.getNumChannels())
+        {
+            rejectedCallbackCount.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
+
+        scratchInput.clear (0, numSamples);
+        juce::AudioBuffer<float> outputView (scratchOutput.getArrayOfWritePointers(),
+                                             numOutputChannels,
+                                             numSamples);
+        outputView.clear();
+        performance.process (scratchInput, outputView);
+
+        for (int channel = 0; channel < numOutputChannels; ++channel)
+            if (outputChannelData[channel] != nullptr)
+                juce::FloatVectorOperations::copy (outputChannelData[channel],
+                                                   scratchOutput.getReadPointer (channel),
+                                                   numSamples);
+
+        renderedCallbackCount.fetch_add (1, std::memory_order_relaxed);
+    }
+
+    void resetScratchBuffers()
+    {
+        scratchInput.setSize (0, 0);
+        scratchOutput.setSize (0, 0);
+    }
+
+    static void clearHostOutputs (float* const* outputChannelData, int numOutputChannels, int numSamples)
+    {
+        if (outputChannelData == nullptr || numSamples <= 0)
+            return;
+
+        for (int channel = 0; channel < numOutputChannels; ++channel)
+            if (outputChannelData[channel] != nullptr)
+                juce::FloatVectorOperations::clear (outputChannelData[channel], numSamples);
+    }
+
+public:
+    EmbeddedPerformanceEngine performance;
+    juce::AudioBuffer<float> scratchInput;
+    juce::AudioBuffer<float> scratchOutput;
+    std::atomic<bool> deviceReady { false };
+    std::atomic<uint64_t> successfulPrepareCount { 0 };
+    std::atomic<uint64_t> rejectedPrepareCount { 0 };
+    std::atomic<uint64_t> renderedCallbackCount { 0 };
+    std::atomic<uint64_t> rejectedCallbackCount { 0 };
+    std::atomic<uint64_t> callbackExceptionCount { 0 };
+
+private:
+    bool quickDemo = false;
+};
+
 namespace
 {
 using ParameterBinding = EmbeddedChucKEngine::ParameterBinding;
@@ -1256,6 +1517,130 @@ int runAsyncProgramLoadTest()
     return 0;
 }
 
+int runScoreScriptTest()
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    constexpr int blockSize = 256;
+    EmbeddedChucKEngine engine;
+    if (! engine.prepare (48000.0, blockSize, 0, 1))
+    {
+        juce::Logger::writeToLog ("Score-script test prepare failed: " + engine.getLastError());
+        return 210;
+    }
+
+    const auto program = ChucKScoreScript::buildProgram (R"chuck(
+score.clear();
+tempo(120);
+meter(4, 4);
+phase(0.25);
+state.add("Intro", 16, 4);
+track.add(1, "Lead", "chuck");
+track.gain(1, 1, 0.7);
+track.mute(1, 1, 0);
+track.solo(1, 1, 0);
+track.code(1, 1, "base64:U2luT3NjIHMgPT4gZGFjOwo=");
+1::bar => now;
+track.phase(1, 1, 0.5);
+stop();
+)chuck");
+
+    if (! engine.loadProgram (program.source, ChucKScoreScript::getParameterBindings()))
+    {
+        juce::Logger::writeToLog ("Score-script test compile failed: " + engine.getLastError());
+        return 211;
+    }
+
+    const auto commandIndex = engine.getParameterIndex ("weldScoreCommand");
+    if (commandIndex < 0)
+    {
+        juce::Logger::writeToLog ("Score-script test failed: command bridge missing");
+        return 212;
+    }
+
+    std::array<int, ChucKScoreScript::argumentCount> argIndices {};
+    for (int i = 0; i < ChucKScoreScript::argumentCount; ++i)
+    {
+        argIndices[static_cast<size_t> (i)] = engine.getParameterIndex ("weldScoreArg" + juce::String (i));
+        if (argIndices[static_cast<size_t> (i)] < 0)
+        {
+            juce::Logger::writeToLog ("Score-script test failed: argument bridge missing");
+            return 213;
+        }
+    }
+
+    juce::AudioBuffer<float> input (0, blockSize);
+    juce::AudioBuffer<float> output (1, blockSize);
+    std::vector<int> commands;
+    std::vector<std::array<float, ChucKScoreScript::argumentCount>> argsByCommand;
+    std::vector<std::array<juce::String, 2>> textByCommand;
+
+    constexpr int maxBlocks = 1200;
+    for (int block = 0; block < maxBlocks; ++block)
+    {
+        output.clear();
+        engine.process (input, output);
+        engine.pullParameterValuesFromGlobals();
+
+        const auto command = juce::roundToInt (engine.getParameterValue (commandIndex));
+        if (command != 0)
+        {
+            std::array<float, ChucKScoreScript::argumentCount> args {};
+            for (int i = 0; i < ChucKScoreScript::argumentCount; ++i)
+                args[static_cast<size_t> (i)] = engine.getParameterValue (argIndices[static_cast<size_t> (i)]);
+
+            commands.push_back (command);
+            argsByCommand.push_back (args);
+            textByCommand.push_back ({ engine.getGlobalStringValue ("weldScoreText0"),
+                                       engine.getGlobalStringValue ("weldScoreText1") });
+            engine.setParameterValue (commandIndex, 0.0f);
+
+            if (command == static_cast<int> (ChucKScoreScript::CommandId::scoreComplete))
+                break;
+        }
+    }
+
+    const std::vector<int> expected
+    {
+        static_cast<int> (ChucKScoreScript::CommandId::scoreClear),
+        static_cast<int> (ChucKScoreScript::CommandId::tempo),
+        static_cast<int> (ChucKScoreScript::CommandId::meter),
+        static_cast<int> (ChucKScoreScript::CommandId::phase),
+        static_cast<int> (ChucKScoreScript::CommandId::stateAdd),
+        static_cast<int> (ChucKScoreScript::CommandId::trackAdd),
+        static_cast<int> (ChucKScoreScript::CommandId::trackGain),
+        static_cast<int> (ChucKScoreScript::CommandId::trackMute),
+        static_cast<int> (ChucKScoreScript::CommandId::trackSolo),
+        static_cast<int> (ChucKScoreScript::CommandId::trackCode),
+        static_cast<int> (ChucKScoreScript::CommandId::trackPhase),
+        static_cast<int> (ChucKScoreScript::CommandId::stop),
+        static_cast<int> (ChucKScoreScript::CommandId::scoreComplete)
+    };
+
+    if (commands != expected)
+    {
+        juce::Logger::writeToLog ("Score-script test failed: command sequence length="
+                                  + juce::String (static_cast<int> (commands.size())));
+        return 214;
+    }
+
+    if (textByCommand[4][0] != "Intro"
+        || argsByCommand[5][0] != 1.0f
+        || textByCommand[5][0] != "Lead"
+        || textByCommand[5][1] != "chuck"
+        || ! valuesAreClose (argsByCommand[6][2], 0.7f)
+        || textByCommand[9][0] != "base64:U2luT3NjIHMgPT4gZGFjOwo="
+        || ! valuesAreClose (argsByCommand[10][2], 0.5f))
+    {
+        juce::Logger::writeToLog ("Score-script test failed: bridged arguments are wrong");
+        return 215;
+    }
+
+    juce::Logger::writeToLog ("Score-script test passed: commands="
+                              + juce::String (static_cast<int> (commands.size())));
+    return 0;
+}
+
 int runBoundaryTest()
 {
     juce::ScopedNoDenormals noDenormals;
@@ -1646,6 +2031,59 @@ int runCallbackTest()
     return 0;
 }
 
+int runPerformanceDemo (bool quickDemo)
+{
+    PerformanceAudioCallback callback (quickDemo);
+    juce::AudioDeviceManager deviceManager;
+
+    const auto error = deviceManager.initialiseWithDefaultDevices (0, 2);
+    if (error.isNotEmpty())
+    {
+        juce::Logger::writeToLog ("Audio device error: " + error);
+        return 1;
+    }
+
+    deviceManager.addAudioCallback (&callback);
+
+    for (int attempt = 0; attempt < 100
+         && ! callback.deviceReady.load (std::memory_order_acquire)
+         && callback.rejectedPrepareCount.load (std::memory_order_relaxed) == 0;
+         ++attempt)
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+
+    if (! callback.deviceReady.load (std::memory_order_acquire))
+    {
+        deviceManager.removeAudioCallback (&callback);
+        juce::Logger::writeToLog ("Performance demo could not start: " + callback.performance.getLastError());
+        return 1;
+    }
+
+    juce::Logger::writeToLog (quickDemo
+                                ? "Playing quick performance demo: ChucK -> SuperCollider -> RTcmix."
+                                : "Playing performance demo: 30s ChucK -> 20s SuperCollider -> 25s RTcmix, with tails.");
+
+    const auto timeout = std::chrono::steady_clock::now() + std::chrono::seconds (quickDemo ? 35 : 120);
+    while (! callback.hasFinished() && std::chrono::steady_clock::now() < timeout)
+        std::this_thread::sleep_for (std::chrono::milliseconds (100));
+
+    deviceManager.removeAudioCallback (&callback);
+
+    juce::Logger::writeToLog ("Performance demo diagnostics: renderedCallbacks="
+                              + juce::String (static_cast<juce::int64> (callback.renderedCallbackCount.load()))
+                              + " rejectedCallbacks="
+                              + juce::String (static_cast<juce::int64> (callback.rejectedCallbackCount.load()))
+                              + " callbackExceptions="
+                              + juce::String (static_cast<juce::int64> (callback.callbackExceptionCount.load()))
+                              + " renderedFrames="
+                              + juce::String (static_cast<juce::int64> (callback.performance.getRenderedFrameCount()))
+                              + " activeStates="
+                              + juce::String (callback.performance.getActiveStateCount()));
+
+    return callback.callbackExceptionCount.load (std::memory_order_relaxed) == 0 ? 0 : 1;
+}
+
 bool hasArgument (int argc, char* argv[], const char* argument)
 {
     for (int i = 1; i < argc; ++i)
@@ -1679,11 +2117,20 @@ int main (int argc, char* argv[])
     if (hasArgument (argc, argv, "--async-program-test"))
         return runAsyncProgramLoadTest();
 
+    if (hasArgument (argc, argv, "--score-script-test"))
+        return runScoreScriptTest();
+
     if (hasArgument (argc, argv, "--boundary-test"))
         return runBoundaryTest();
 
     if (hasArgument (argc, argv, "--concurrency-test"))
         return runConcurrencyTest();
+
+    if (hasArgument (argc, argv, "--performance-demo"))
+        return runPerformanceDemo (false);
+
+    if (hasArgument (argc, argv, "--quick-performance-demo"))
+        return runPerformanceDemo (true);
 
     ChucKAudioCallback callback;
     juce::AudioDeviceManager deviceManager;

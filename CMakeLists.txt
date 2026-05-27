@@ -10,6 +10,108 @@ set(JUCE_PATH "/Users/user/Documents/Fabric/JUCE" CACHE PATH "Path to a JUCE che
 add_subdirectory("${JUCE_PATH}" JUCE)
 
 set(CHUCK_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/chuck/src/core")
+set(WELD_RTCMIX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rtcmix" CACHE PATH "Path to an RTcmix checkout with an embedded build")
+set(WELD_RTCMIX_LIBRARY "" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib or librtcmix_embedded.so")
+set(WELD_CSOUND_LIBRARY "" CACHE FILEPATH "Optional path to libcsound64.dylib, libcsound.dylib, or libcsound.so")
+set(WELD_SUPERCOLLIDER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/supercollider" CACHE PATH "Path to a SuperCollider checkout with the Weld host audio backend")
+set(WELD_SUPERCOLLIDER_LIBRARY "" CACHE FILEPATH "Optional path to a host-audio libscsynth.dylib or libscsynth.so")
+set(WELD_SUPERCOLLIDER_LANG_LIBRARY "" CACHE FILEPATH "Optional path to libweldsclang.dylib or libweldsclang.so")
+
+set(WELD_HAS_RTCMIX 0)
+set(WELD_RTCMIX_INCLUDE_DIR "${WELD_RTCMIX_ROOT}/src/rtcmix")
+set(WELD_RTCMIX_DEFAULT_LIBRARY "")
+set(WELD_HAS_CSOUND 1)
+set(WELD_CSOUND_DEFAULT_LIBRARY "")
+set(WELD_HAS_SUPERCOLLIDER 0)
+set(WELD_SUPERCOLLIDER_INCLUDE_DIR "${WELD_SUPERCOLLIDER_ROOT}/include/server")
+set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "")
+set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "")
+
+if (APPLE AND EXISTS "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.dylib")
+    set(WELD_RTCMIX_DEFAULT_LIBRARY "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.dylib")
+elseif (UNIX AND EXISTS "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.so")
+    set(WELD_RTCMIX_DEFAULT_LIBRARY "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.so")
+endif()
+
+if ((WELD_RTCMIX_LIBRARY STREQUAL "" OR WELD_RTCMIX_LIBRARY MATCHES "\\.a$")
+    AND NOT WELD_RTCMIX_DEFAULT_LIBRARY STREQUAL "")
+    set(WELD_RTCMIX_LIBRARY "${WELD_RTCMIX_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib or librtcmix_embedded.so" FORCE)
+endif()
+
+if (EXISTS "${WELD_RTCMIX_INCLUDE_DIR}/RTcmix_API.h")
+    set(WELD_HAS_RTCMIX 1)
+    if (WELD_RTCMIX_LIBRARY STREQUAL "")
+        message(STATUS "RTcmix embedded backend enabled; set WELD_RTCMIX_LIBRARY or WELD_RTCMIX_LIBRARY env var before running to choose the runtime library")
+    else()
+        message(STATUS "RTcmix embedded backend enabled; runtime library hint: ${WELD_RTCMIX_LIBRARY}")
+    endif()
+else()
+    message(STATUS "RTcmix embedded backend disabled; set WELD_RTCMIX_ROOT after cloning RTcmix")
+endif()
+
+if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/CsoundLib64.framework/CsoundLib64")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/CsoundLib64.framework/CsoundLib64")
+elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.so")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.so")
+elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.dylib")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.dylib")
+elseif (APPLE AND EXISTS "/opt/homebrew/lib/libcsound64.dylib")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "/opt/homebrew/lib/libcsound64.dylib")
+elseif (APPLE AND EXISTS "/usr/local/lib/libcsound64.dylib")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "/usr/local/lib/libcsound64.dylib")
+elseif (APPLE AND EXISTS "/Library/Frameworks/CsoundLib64.framework/CsoundLib64")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "/Library/Frameworks/CsoundLib64.framework/CsoundLib64")
+elseif (UNIX AND EXISTS "/usr/local/lib/libcsound64.so")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "/usr/local/lib/libcsound64.so")
+elseif (UNIX AND EXISTS "/usr/lib/libcsound64.so")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "/usr/lib/libcsound64.so")
+endif()
+
+if (WELD_CSOUND_LIBRARY STREQUAL "" AND NOT WELD_CSOUND_DEFAULT_LIBRARY STREQUAL "")
+    set(WELD_CSOUND_LIBRARY "${WELD_CSOUND_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional path to libcsound64.dylib, libcsound.dylib, or libcsound.so" FORCE)
+endif()
+
+if (WELD_CSOUND_LIBRARY STREQUAL "")
+    message(STATUS "Csound embedded backend enabled; set WELD_CSOUND_LIBRARY or WELD_CSOUND_LIBRARY env var before running to choose libcsound")
+else()
+    message(STATUS "Csound embedded backend enabled; runtime library hint: ${WELD_CSOUND_LIBRARY}")
+endif()
+
+if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.dylib")
+    set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.dylib")
+elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.so")
+    set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.so")
+endif()
+
+if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.dylib")
+    set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.dylib")
+elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.so")
+    set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.so")
+endif()
+
+if (WELD_SUPERCOLLIDER_LIBRARY STREQUAL "" AND NOT WELD_SUPERCOLLIDER_DEFAULT_LIBRARY STREQUAL "")
+    set(WELD_SUPERCOLLIDER_LIBRARY "${WELD_SUPERCOLLIDER_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional path to a host-audio libscsynth.dylib or libscsynth.so" FORCE)
+endif()
+
+if (WELD_SUPERCOLLIDER_LANG_LIBRARY STREQUAL "" AND NOT WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY STREQUAL "")
+    set(WELD_SUPERCOLLIDER_LANG_LIBRARY "${WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY}" CACHE FILEPATH "Optional path to libweldsclang.dylib or libweldsclang.so" FORCE)
+endif()
+
+if (EXISTS "${WELD_SUPERCOLLIDER_INCLUDE_DIR}/SC_WorldOptions.h")
+    set(WELD_HAS_SUPERCOLLIDER 1)
+    if (WELD_SUPERCOLLIDER_LIBRARY STREQUAL "")
+        message(STATUS "SuperCollider embedded backend enabled; set WELD_SUPERCOLLIDER_LIBRARY or WELD_SUPERCOLLIDER_LIBRARY env var before running to choose the host-audio libscsynth")
+    else()
+        message(STATUS "SuperCollider embedded backend enabled; runtime library hint: ${WELD_SUPERCOLLIDER_LIBRARY}")
+    endif()
+    if (WELD_SUPERCOLLIDER_LANG_LIBRARY STREQUAL "")
+        message(STATUS "SuperCollider language bridge enabled; set WELD_SUPERCOLLIDER_LANG_LIBRARY or WELD_SUPERCOLLIDER_LANG_LIBRARY env var before running to compile SC source")
+    else()
+        message(STATUS "SuperCollider language bridge hint: ${WELD_SUPERCOLLIDER_LANG_LIBRARY}")
+    endif()
+else()
+    message(STATUS "SuperCollider embedded backend disabled; set WELD_SUPERCOLLIDER_ROOT after cloning SuperCollider")
+endif()
 
 add_library(chuck_core STATIC
     ${CHUCK_CORE_DIR}/chuck_yacc.c
@@ -105,8 +207,14 @@ add_library(WeldChucK::Engine ALIAS weld_chuck_engine)
 
 target_sources(weld_chuck_engine
     PRIVATE
+        Source/WeldChucK/ChucKScoreScript.cpp
+        Source/WeldChucK/ChucKScoreScript.h
         Source/WeldChucK/EmbeddedChucKEngine.cpp
         Source/WeldChucK/EmbeddedChucKEngine.h
+        Source/WeldChucK/EmbeddedLanguageEngine.cpp
+        Source/WeldChucK/EmbeddedLanguageEngine.h
+        Source/WeldChucK/EmbeddedPerformanceEngine.cpp
+        Source/WeldChucK/EmbeddedPerformanceEngine.h
         Source/WeldChucK/WeldChucKEngine.h)
 
 target_include_directories(weld_chuck_engine
@@ -114,6 +222,19 @@ target_include_directories(weld_chuck_engine
         ${CMAKE_CURRENT_SOURCE_DIR}/Source/WeldChucK
     PRIVATE
         ${JUCE_PATH}/modules)
+
+if (WELD_HAS_RTCMIX)
+    target_include_directories(weld_chuck_engine
+        PRIVATE
+            ${WELD_RTCMIX_INCLUDE_DIR})
+endif()
+
+if (WELD_HAS_SUPERCOLLIDER)
+    target_include_directories(weld_chuck_engine
+        SYSTEM PRIVATE
+            ${WELD_SUPERCOLLIDER_INCLUDE_DIR}
+            ${WELD_SUPERCOLLIDER_ROOT}/include/common)
+endif()
 
 target_link_libraries(weld_chuck_engine
     PRIVATE
@@ -128,6 +249,13 @@ target_link_libraries(weld_chuck_engine
 
 target_compile_definitions(weld_chuck_engine
     PRIVATE
+        WELD_HAS_RTCMIX=${WELD_HAS_RTCMIX}
+        WELD_HAS_CSOUND=${WELD_HAS_CSOUND}
+        WELD_HAS_SUPERCOLLIDER=${WELD_HAS_SUPERCOLLIDER}
+        WELD_RTCMIX_DEFAULT_LIBRARY="${WELD_RTCMIX_LIBRARY}"
+        WELD_CSOUND_DEFAULT_LIBRARY="${WELD_CSOUND_LIBRARY}"
+        WELD_SUPERCOLLIDER_DEFAULT_LIBRARY="${WELD_SUPERCOLLIDER_LIBRARY}"
+        WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY="${WELD_SUPERCOLLIDER_LANG_LIBRARY}"
         JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
         JUCE_MODULE_AVAILABLE_juce_audio_basics=1
         JUCE_MODULE_AVAILABLE_juce_core=1
@@ -154,6 +282,26 @@ target_link_libraries(WeldChucK
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+juce_add_gui_app(WeldChucKGui
+    PRODUCT_NAME "Weld ChucK GUI"
+    COMPANY_NAME "Codex"
+    BUNDLE_ID "com.codex.weldchuck.gui")
+
+target_sources(WeldChucKGui
+    PRIVATE
+        Source/Gui/Main.cpp)
+
+target_link_libraries(WeldChucKGui
+    PRIVATE
+        WeldChucK::Engine
+        juce::juce_audio_devices
+        juce::juce_data_structures
+        juce::juce_events
+        juce::juce_gui_basics
+    PUBLIC
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
 add_executable(WeldChucKEngineBoundaryTest
     Tests/EngineBoundaryTest.cpp)
 
@@ -170,6 +318,7 @@ add_test(NAME WeldChucKFuzzTest COMMAND WeldChucK --fuzz-test)
 add_test(NAME WeldChucKProgramTest COMMAND WeldChucK --program-test)
 add_test(NAME WeldChucKParameterTest COMMAND WeldChucK --parameter-test)
 add_test(NAME WeldChucKAsyncProgramTest COMMAND WeldChucK --async-program-test)
+add_test(NAME WeldChucKScoreScriptTest COMMAND WeldChucK --score-script-test)
 add_test(NAME WeldChucKBoundaryTest COMMAND WeldChucK --boundary-test)
 add_test(NAME WeldChucKConcurrencyTest COMMAND WeldChucK --concurrency-test)
 add_test(NAME WeldChucKEngineBoundaryTest COMMAND WeldChucKEngineBoundaryTest)
@@ -181,6 +330,7 @@ set_tests_properties(WeldChucKSelfTest
                      WeldChucKProgramTest
                      WeldChucKParameterTest
                      WeldChucKAsyncProgramTest
+                     WeldChucKScoreScriptTest
                      WeldChucKBoundaryTest
                      WeldChucKConcurrencyTest
                      WeldChucKEngineBoundaryTest

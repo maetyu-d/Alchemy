@@ -1,0 +1,19 @@
+diff --git a/src/rtcmix/intraverse.cpp b/src/rtcmix/intraverse.cpp
+index dc39d31d..0c18b59e 100644
+--- a/src/rtcmix/intraverse.cpp
++++ b/src/rtcmix/intraverse.cpp
+@@ -379,7 +379,9 @@ bool RTcmix::inTraverse(AudioDevice *device, void *arg)
+ 			if (rtQSize > 0) {
+ 				rtQchunkStart = rtQueue[busq].nextChunk();
+ 				// DS ADDED
++#ifndef EMBEDDED
+ 				assert(rtQchunkStart > 0 || bufStartSamp == 0);
++#endif
+ 			}
+ 		}
+ 		else {
+@@ -796,4 +798,3 @@ bool RTcmix::doneTraverse(AudioDevice *device, void *arg)
+ 
+ 	return true;
+ }
+-

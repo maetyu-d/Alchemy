@@ -1,0 +1,2234 @@
+#include <juce_audio_devices/juce_audio_devices.h>
+#include <juce_data_structures/juce_data_structures.h>
+#include <juce_events/juce_events.h>
+#include <juce_gui_basics/juce_gui_basics.h>
+
+#include "WeldChucKEngine.h"
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <cmath>
+#include <memory>
+#include <vector>
+
+namespace
+{
+constexpr int maxStateCount = 16;
+constexpr int maxTrackCountPerState = 16;
+
+using Language = EmbeddedLanguageEngine::Language;
+
+struct TrackModel
+{
+    juce::String name;
+    Language language = Language::chuck;
+    bool tightlySynced = true;
+    double tempoBpm = 120.0;
+    int timeSigNumerator = 4;
+    int timeSigDenominator = 4;
+    double phaseBeats = 0.0;
+    float level = 0.75f;
+    bool muted = false;
+    bool soloed = false;
+    juce::String code;
+};
+
+struct StateModel
+{
+    juce::String name;
+    double durationBeats = 16.0;
+    double tailBeats = 4.0;
+    int canvasX = 0;
+    int canvasY = 0;
+    std::vector<TrackModel> tracks;
+};
+
+struct ProjectModel
+{
+    double globalTempoBpm = 120.0;
+    int globalTimeSigNumerator = 4;
+    int globalTimeSigDenominator = 4;
+    double globalPhaseBeats = 0.0;
+    juce::String chuckScoreScript;
+    std::vector<StateModel> states;
+};
+
+juce::String languageName (Language language)
+{
+    return EmbeddedLanguageEngine::getLanguageName (language);
+}
+
+Language languageFromIndex (int index)
+{
+    switch (index)
+    {
+        case 1: return Language::chuck;
+        case 2: return Language::supercollider;
+        case 3: return Language::rtcmix;
+        case 4: return Language::csound;
+        case 5: return Language::faust;
+        default: return Language::chuck;
+    }
+}
+
+int indexForLanguage (Language language)
+{
+    switch (language)
+    {
+        case Language::chuck: return 1;
+        case Language::supercollider: return 2;
+        case Language::rtcmix: return 3;
+        case Language::csound: return 4;
+        case Language::faust: return 5;
+    }
+
+    return 1;
+}
+
+Language languageFromName (const juce::String& name)
+{
+    const auto normalised = name.toLowerCase();
+    if (normalised == "sc" || normalised == "supercollider")
+        return Language::supercollider;
+    if (normalised == "rtcmix" || normalised == "rt")
+        return Language::rtcmix;
+    if (normalised == "csound" || normalised == "cs")
+        return Language::csound;
+    if (normalised == "faust")
+        return Language::faust;
+
+    return Language::chuck;
+}
+
+double beatsPerSecond (double bpm) noexcept
+{
+    return juce::jlimit (1.0, 999.0, bpm) / 60.0;
+}
+
+double oneBarBeats (const ProjectModel& project) noexcept
+{
+    return juce::jmax (1, project.globalTimeSigNumerator) * (4.0 / juce::jmax (1, project.globalTimeSigDenominator));
+}
+
+double totalDurationBeats (const ProjectModel& project) noexcept
+{
+    double total = 0.0;
+
+    for (const auto& state : project.states)
+        total += juce::jmax (0.0, state.durationBeats);
+
+    return total;
+}
+
+bool projectHasSoloedTrack (const ProjectModel& project)
+{
+    for (const auto& state : project.states)
+        for (const auto& track : state.tracks)
+            if (track.soloed)
+                return true;
+
+    return false;
+}
+
+float effectiveTrackGain (const ProjectModel& project, int stateIndex, int trackIndex)
+{
+    if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+        return 0.0f;
+
+    const auto& state = project.states[static_cast<size_t> (stateIndex)];
+    if (trackIndex < 0 || trackIndex >= static_cast<int> (state.tracks.size()))
+        return 0.0f;
+
+    const auto& track = state.tracks[static_cast<size_t> (trackIndex)];
+    if (track.muted || (projectHasSoloedTrack (project) && ! track.soloed))
+        return 0.0f;
+
+    return juce::jlimit (0.0f, 4.0f, track.level);
+}
+
+int meterIdFor (int numerator, int denominator) noexcept
+{
+    if (numerator == 3 && denominator == 4)
+        return 1;
+    if (numerator == 5 && denominator == 4)
+        return 3;
+    if (numerator == 7 && denominator == 8)
+        return 4;
+    if (numerator == 4 && denominator == 4)
+        return 2;
+
+    return 0;
+}
+
+juce::Colour languageColour (Language language)
+{
+    switch (language)
+    {
+        case Language::chuck: return juce::Colour (0xff69b1c9);
+        case Language::supercollider: return juce::Colour (0xffc98569);
+        case Language::rtcmix: return juce::Colour (0xff86bd72);
+        case Language::csound: return juce::Colour (0xffc1a85d);
+        case Language::faust: return juce::Colour (0xffb07ac7);
+    }
+
+    return juce::Colours::white;
+}
+
+void configureCodeEditor (juce::TextEditor& editor, float fontSize = 13.0f)
+{
+    editor.setMultiLine (true);
+    editor.setReturnKeyStartsNewLine (true);
+    editor.setScrollbarsShown (true);
+    editor.setTabKeyUsedAsCharacter (true);
+    editor.setPopupMenuEnabled (true);
+    editor.setFont (juce::FontOptions (fontSize));
+    editor.setIndents (8, 6);
+    editor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff0b0f0e));
+    editor.setColour (juce::TextEditor::textColourId, juce::Colour (0xffe6eee9));
+    editor.setColour (juce::TextEditor::highlightColourId, juce::Colour (0xff49665f));
+    editor.setColour (juce::TextEditor::highlightedTextColourId, juce::Colours::white);
+    editor.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff33403c));
+    editor.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (0xff84c7b6));
+}
+
+juce::String defaultChucKScoreScript()
+{
+    return "score.clear();\n"
+           "tempo(120);\n"
+           "meter(4, 4);\n"
+           "state.add(\"State 1\", 16, 4);\n"
+           "track.add(1, \"ChucK lead\", \"chuck\");\n"
+           "track.gain(1, 1, 0.75);\n"
+           "state.add(\"State 2\", 12, 4);\n"
+           "track.add(2, \"SC harmonic\", \"supercollider\");\n"
+           "track.gain(2, 1, 0.72);\n"
+           "state.add(\"State 3\", 20, 4);\n"
+           "track.add(3, \"RTcmix bass\", \"rtcmix\");\n"
+           "track.gain(3, 1, 0.65);\n"
+           "play();\n";
+}
+
+juce::String quoteScoreString (juce::String text)
+{
+    text = text.replace ("\\", "\\\\");
+    text = text.replace ("\"", "\\\"");
+    text = text.replace ("\r", "\\r");
+    text = text.replace ("\n", "\\n");
+    text = text.replace ("\t", "\\t");
+    return "\"" + text + "\"";
+}
+
+juce::String encodeScoreCode (const juce::String& code)
+{
+    return "base64:" + juce::Base64::toBase64 (code);
+}
+
+juce::String languageToken (Language language)
+{
+    switch (language)
+    {
+        case Language::supercollider: return "supercollider";
+        case Language::rtcmix: return "rtcmix";
+        case Language::csound: return "csound";
+        case Language::faust: return "faust";
+        case Language::chuck: break;
+    }
+
+    return "chuck";
+}
+
+juce::String generateChucKScoreScript (const ProjectModel& project)
+{
+    juce::String script;
+    script << "score.clear();\n";
+    script << "tempo(" << juce::String (project.globalTempoBpm, 3) << ");\n";
+    script << "meter(" << project.globalTimeSigNumerator << ", " << project.globalTimeSigDenominator << ");\n";
+    script << "phase(" << juce::String (project.globalPhaseBeats, 3) << ");\n\n";
+
+    for (size_t stateIndex = 0; stateIndex < project.states.size(); ++stateIndex)
+    {
+        const auto& state = project.states[stateIndex];
+        script << "state.add(" << quoteScoreString (state.name)
+               << ", " << juce::String (state.durationBeats, 3)
+               << ", " << juce::String (state.tailBeats, 3) << ");\n";
+
+        const auto stateNumber = static_cast<int> (stateIndex) + 1;
+        for (size_t trackIndex = 0; trackIndex < state.tracks.size(); ++trackIndex)
+        {
+            const auto& track = state.tracks[trackIndex];
+            const auto trackNumber = static_cast<int> (trackIndex) + 1;
+            script << "track.add(" << stateNumber
+                   << ", " << quoteScoreString (track.name)
+                   << ", " << quoteScoreString (languageToken (track.language)) << ");\n";
+            script << "track.gain(" << stateNumber << ", " << trackNumber << ", " << juce::String (track.level, 3) << ");\n";
+            script << "track.sync(" << stateNumber << ", " << trackNumber << ", " << (track.tightlySynced ? 1 : 0) << ");\n";
+            script << "track.mute(" << stateNumber << ", " << trackNumber << ", " << (track.muted ? 1 : 0) << ");\n";
+            script << "track.solo(" << stateNumber << ", " << trackNumber << ", " << (track.soloed ? 1 : 0) << ");\n";
+
+            if (! track.tightlySynced)
+            {
+                script << "track.tempo(" << stateNumber << ", " << trackNumber << ", " << juce::String (track.tempoBpm, 3) << ");\n";
+                script << "track.meter(" << stateNumber << ", " << trackNumber << ", "
+                       << track.timeSigNumerator << ", " << track.timeSigDenominator << ");\n";
+                script << "track.phase(" << stateNumber << ", " << trackNumber << ", " << juce::String (track.phaseBeats, 3) << ");\n";
+            }
+
+            if (track.code.isNotEmpty())
+                script << "track.code(" << stateNumber << ", " << trackNumber << ", " << quoteScoreString (encodeScoreCode (track.code)) << ");\n";
+            else
+                script << "track.clear(" << stateNumber << ", " << trackNumber << ");\n";
+        }
+
+        script << "\n";
+    }
+
+    script << "play();\n";
+    return script;
+}
+
+juce::String defaultCodeForLanguage (Language language)
+{
+    switch (language)
+    {
+        case Language::supercollider:
+            return "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1|\n"
+                   "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain * hostTrackGain)\n"
+                   "}\n";
+
+        case Language::rtcmix:
+            return "bus_config(\"WAVETABLE\", \"out 0\")\n"
+                   "freq = makeconnection(\"inlet\", 1, 165)\n"
+                   "gain = makeconnection(\"inlet\", 2, 0.02)\n"
+                   "pan = makeconnection(\"inlet\", 3, 0.55)\n"
+                   "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
+                   "trackgain = makeconnection(\"inlet\", 11, 1.0)\n"
+                   "wave = maketable(\"wave\", 4096, \"sine\")\n"
+                   "WAVETABLE(0, 3600, gain * stategain * trackgain * 32767.0, freq, pan, wave)\n";
+
+        case Language::csound:
+            return "instr 1\n"
+                   "    kfreq chnget \"hostFreq\"\n"
+                   "    kgain chnget \"hostGain\"\n"
+                   "    ktrack chnget \"hostTrackGain\"\n"
+                   "    a1 oscili kgain * ktrack, kfreq\n"
+                   "    outs a1, a1\n"
+                   "endin\n";
+
+        case Language::faust:
+            return "import(\"stdfaust.lib\");\n"
+                   "freq = hslider(\"hostFreq\", 220, 40, 4000, 0.01);\n"
+                   "gain = hslider(\"hostGain\", 0.04, 0, 0.1, 0.001);\n"
+                   "process = os.osc(freq) * gain <: _, _;\n";
+
+        case Language::chuck:
+            break;
+    }
+
+    return "SinOsc s => Gain g => dac;\n"
+           "while (true) {\n"
+           "    Math.max(40.0, hostFreq) => s.freq;\n"
+           "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain * hostTrackGain => g.gain;\n"
+           "    1::samp => now;\n"
+           "}\n";
+}
+
+TrackModel makeTrack (juce::String name, Language language)
+{
+    TrackModel track;
+    track.name = std::move (name);
+    track.language = language;
+    track.code = defaultCodeForLanguage (language);
+    return track;
+}
+
+StateModel makeState (int index)
+{
+    StateModel state;
+    state.name = "State " + juce::String (index);
+    state.durationBeats = 16.0;
+    state.tailBeats = 4.0;
+    state.canvasX = 70 + ((index - 1) % 5) * 220;
+    state.canvasY = 40 + ((index - 1) / 5) * 88;
+    state.tracks.push_back (makeTrack ("Track 1", Language::chuck));
+    return state;
+}
+
+ProjectModel makeInitialProject()
+{
+    ProjectModel project;
+    project.chuckScoreScript = defaultChucKScoreScript();
+    project.states.reserve (3);
+
+    StateModel chuck;
+    chuck.name = "State 1";
+    chuck.durationBeats = 16.0;
+    chuck.tailBeats = 4.0;
+    chuck.canvasX = 70;
+    chuck.canvasY = 40;
+    chuck.tracks.push_back ({ "ChucK lead",
+                              Language::chuck,
+                              true,
+                              120.0,
+                              4,
+                              4,
+                              0.0,
+                              0.75f,
+                              false,
+                              false,
+                              "SinOsc s => Gain g => dac;\n"
+                              "while (true) {\n"
+                              "    Math.max(40.0, hostFreq) => s.freq;\n"
+                              "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain => g.gain;\n"
+                              "    1::samp => now;\n"
+                              "}\n" });
+
+    StateModel sc;
+    sc.name = "State 2";
+    sc.durationBeats = 12.0;
+    sc.tailBeats = 4.0;
+    sc.canvasX = 330;
+    sc.canvasY = 88;
+    sc.tracks.push_back ({ "SC harmonic",
+                           Language::supercollider,
+                           true,
+                           120.0,
+                           4,
+                           4,
+                           0.0,
+                           0.72f,
+                           false,
+                           false,
+                           "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1|\n"
+                           "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain)\n"
+                           "}\n" });
+
+    StateModel rtcmix;
+    rtcmix.name = "State 3";
+    rtcmix.durationBeats = 20.0;
+    rtcmix.tailBeats = 4.0;
+    rtcmix.canvasX = 590;
+    rtcmix.canvasY = 40;
+    rtcmix.tracks.push_back ({ "RTcmix bass",
+                               Language::rtcmix,
+                               true,
+                               120.0,
+                               4,
+                               4,
+                               0.0,
+                               0.65f,
+                               false,
+                               false,
+                               "bus_config(\"WAVETABLE\", \"out 0\")\n"
+                               "freq = makeconnection(\"inlet\", 1, 165)\n"
+                               "gain = makeconnection(\"inlet\", 2, 0.02)\n"
+                               "pan = makeconnection(\"inlet\", 3, 0.55)\n"
+                               "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
+                               "wave = maketable(\"wave\", 4096, \"sine\")\n"
+                               "WAVETABLE(0, 3600, gain * stategain * 32767.0, freq, pan, wave)\n" });
+
+    project.states.push_back (std::move (chuck));
+    project.states.push_back (std::move (sc));
+    project.states.push_back (std::move (rtcmix));
+    return project;
+}
+
+class SectionHeader final : public juce::Component
+{
+public:
+    void setText (juce::String value)
+    {
+        text = std::move (value);
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.setColour (juce::Colour (0xffdce3e1));
+        g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+        g.drawFittedText (text, getLocalBounds(), juce::Justification::centredLeft, 1);
+    }
+
+private:
+    juce::String text;
+};
+
+class ScoreMachineComponent final : public juce::Component
+{
+public:
+    std::function<void()> onPlay;
+    std::function<void()> onStop;
+    std::function<void()> onAddState;
+    std::function<void()> onRemoveState;
+    std::function<void()> onRunChucKScore;
+    std::function<void()> onSyncChucKScore;
+    std::function<void()> onResetChucKScore;
+    std::function<void (int)> onSelectState;
+
+    explicit ScoreMachineComponent (ProjectModel& projectToUse)
+        : project (projectToUse)
+    {
+        addAndMakeVisible (title);
+        title.setText ("Score / State Machine");
+
+        addAndMakeVisible (playButton);
+        playButton.setButtonText ("Play");
+        playButton.onClick = [this]
+        {
+            if (onPlay != nullptr)
+                onPlay();
+        };
+
+        addAndMakeVisible (stopButton);
+        stopButton.setButtonText ("Stop");
+        stopButton.onClick = [this]
+        {
+            if (onStop != nullptr)
+                onStop();
+        };
+
+        addAndMakeVisible (addStateButton);
+        addStateButton.setButtonText ("+ State");
+        addStateButton.onClick = [this]
+        {
+            if (onAddState != nullptr)
+                onAddState();
+        };
+
+        addAndMakeVisible (removeStateButton);
+        removeStateButton.setButtonText ("- State");
+        removeStateButton.onClick = [this]
+        {
+            if (onRemoveState != nullptr)
+                onRemoveState();
+        };
+
+        addAndMakeVisible (tempo);
+        tempo.setSliderStyle (juce::Slider::LinearHorizontal);
+        tempo.setTextBoxStyle (juce::Slider::TextBoxRight, false, 72, 24);
+        tempo.setRange (20.0, 300.0, 0.1);
+        tempo.setValue (project.globalTempoBpm);
+        tempo.onValueChange = [this]
+        {
+            project.globalTempoBpm = tempo.getValue();
+            repaint();
+        };
+
+        addAndMakeVisible (meter);
+        meter.addItem ("3/4", 1);
+        meter.addItem ("4/4", 2);
+        meter.addItem ("5/4", 3);
+        meter.addItem ("7/8", 4);
+        meter.setSelectedId (meterIdFor (project.globalTimeSigNumerator, project.globalTimeSigDenominator),
+                             juce::dontSendNotification);
+        meter.onChange = [this]
+        {
+            switch (meter.getSelectedId())
+            {
+                case 1: project.globalTimeSigNumerator = 3; project.globalTimeSigDenominator = 4; break;
+                case 3: project.globalTimeSigNumerator = 5; project.globalTimeSigDenominator = 4; break;
+                case 4: project.globalTimeSigNumerator = 7; project.globalTimeSigDenominator = 8; break;
+                default: project.globalTimeSigNumerator = 4; project.globalTimeSigDenominator = 4; break;
+            }
+
+            repaint();
+        };
+
+        addAndMakeVisible (phase);
+        phase.setSliderStyle (juce::Slider::LinearHorizontal);
+        phase.setTextBoxStyle (juce::Slider::TextBoxRight, false, 56, 24);
+        phase.setRange (-8.0, 8.0, 0.01);
+        phase.setValue (project.globalPhaseBeats);
+        phase.onValueChange = [this]
+        {
+            project.globalPhaseBeats = phase.getValue();
+            repaint();
+        };
+
+        addAndMakeVisible (runScoreButton);
+        runScoreButton.setButtonText ("Run");
+        runScoreButton.onClick = [this]
+        {
+            if (onRunChucKScore != nullptr)
+                onRunChucKScore();
+        };
+
+        addAndMakeVisible (syncScoreButton);
+        syncScoreButton.setButtonText ("Sync");
+        syncScoreButton.onClick = [this]
+        {
+            if (onSyncChucKScore != nullptr)
+                onSyncChucKScore();
+        };
+
+        addAndMakeVisible (resetScoreButton);
+        resetScoreButton.setButtonText ("Template");
+        resetScoreButton.onClick = [this]
+        {
+            if (onResetChucKScore != nullptr)
+                onResetChucKScore();
+        };
+
+        addAndMakeVisible (clearScoreButton);
+        clearScoreButton.setButtonText ("Clear");
+        clearScoreButton.onClick = [this]
+        {
+            project.chuckScoreScript.clear();
+            scoreScript.setText ({}, false);
+        };
+
+        addAndMakeVisible (scoreScript);
+        configureCodeEditor (scoreScript);
+        scoreScript.setText (project.chuckScoreScript, false);
+        scoreScript.onTextChange = [this] { project.chuckScoreScript = scoreScript.getText(); };
+    }
+
+    void setTransport (bool isCountingInToUse, bool isPlayingToUse, double beatToUse)
+    {
+        isCountingIn = isCountingInToUse;
+        isPlaying = isPlayingToUse;
+        currentBeat = beatToUse;
+        playButton.setToggleState (isCountingIn || isPlaying, juce::dontSendNotification);
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0xff151817));
+        auto area = getLocalBounds().reduced (18);
+        area.removeFromTop (42);
+        const auto editorWidth = scoreEditorWidthFor (area);
+        area.removeFromRight (editorWidth + 12);
+
+        drawPatchGrid (g, area);
+
+        auto timeline = area.removeFromBottom (34).reduced (14, 7);
+        auto patchArea = area.reduced (14);
+        patchArea.removeFromBottom (14);
+        const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
+
+        std::vector<juce::Rectangle<int>> nodes;
+        nodes.reserve (project.states.size());
+
+        const auto nodeWidth = juce::jlimit (112, 188, patchArea.getWidth() / juce::jmax (1, static_cast<int> (project.states.size())) - 14);
+        const auto nodeHeight = juce::jlimit (62, 92, patchArea.getHeight() - 20);
+        const auto usableWidth = juce::jmax (1, patchArea.getWidth() - nodeWidth);
+
+        for (size_t i = 0; i < project.states.size(); ++i)
+        {
+            const auto normalised = project.states.size() <= 1 ? 0.5 : static_cast<double> (i) / static_cast<double> (project.states.size() - 1);
+            const auto x = patchArea.getX() + juce::roundToInt (usableWidth * normalised);
+            const auto wave = std::sin (normalised * juce::MathConstants<double>::twoPi);
+            const auto y = patchArea.getCentreY() - nodeHeight / 2 + juce::roundToInt (wave * 15.0);
+            nodes.push_back ({ x, y, nodeWidth, nodeHeight });
+        }
+
+        for (size_t i = 1; i < nodes.size(); ++i)
+            drawPatchCord (g, nodes[i - 1].getRight(), nodes[i - 1].getCentreY(), nodes[i].getX(), nodes[i].getCentreY());
+
+        for (size_t i = 0; i < project.states.size(); ++i)
+            drawStateNode (g, project.states[i], nodes[i], static_cast<int> (i), static_cast<int> (i) == selectedStateIndex);
+
+        auto x = timeline.getX();
+        double stateStart = 0.0;
+        for (const auto& state : project.states)
+        {
+            const auto stateWidth = juce::jmax (28, juce::roundToInt (timeline.getWidth() * state.durationBeats / totalBeats));
+            auto block = juce::Rectangle<int> (x, timeline.getY(), stateWidth - 2, timeline.getHeight());
+            const auto base = languageColour (state.tracks.empty() ? Language::chuck : state.tracks.front().language);
+            g.setColour (base.withAlpha (0.28f));
+            g.fillRect (block);
+            g.setColour (base.withAlpha (0.8f));
+            g.drawRect (block);
+
+            if ((isCountingIn || isPlaying) && currentBeat >= stateStart && currentBeat <= stateStart + state.durationBeats)
+                drawProgressLine (g, timeline, currentBeat / totalBeats);
+
+            stateStart += state.durationBeats;
+            x += stateWidth;
+        }
+
+        if (isCountingIn)
+        {
+            g.setColour (juce::Colour (0xffffd36e));
+            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.drawText ("Count-in", area.reduced (14).removeFromBottom (26), juce::Justification::centredRight, true);
+        }
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (18);
+        auto top = area.removeFromTop (36);
+        title.setBounds (top.removeFromLeft (230));
+        playButton.setBounds (top.removeFromRight (76));
+        stopButton.setBounds (top.removeFromRight (76).reduced (8, 0));
+        removeStateButton.setBounds (top.removeFromRight (88).reduced (8, 0));
+        addStateButton.setBounds (top.removeFromRight (88).reduced (8, 0));
+        phase.setBounds (top.removeFromRight (170).reduced (8, 0));
+        meter.setBounds (top.removeFromRight (88).reduced (8, 0));
+        tempo.setBounds (top.removeFromRight (210).reduced (8, 0));
+
+        area.removeFromTop (6);
+        const auto editorWidth = scoreEditorWidthFor (area);
+        auto editorArea = area.removeFromRight (editorWidth);
+        auto scoreButtons = editorArea.removeFromTop (28);
+        const auto buttonWidth = scoreButtons.getWidth() / 4;
+        runScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (0, 0));
+        syncScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (6, 0));
+        resetScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (6, 0));
+        clearScoreButton.setBounds (scoreButtons.reduced (6, 0));
+        editorArea.removeFromTop (6);
+        scoreScript.setBounds (editorArea);
+    }
+
+    void setSelectedStateIndex (int index)
+    {
+        selectedStateIndex = index;
+        repaint();
+    }
+
+    void setScoreScriptText (const juce::String& text)
+    {
+        scoreScript.setText (text, false);
+    }
+
+    void syncControlsFromProject()
+    {
+        tempo.setValue (project.globalTempoBpm, juce::dontSendNotification);
+        meter.setSelectedId (meterIdFor (project.globalTimeSigNumerator, project.globalTimeSigDenominator),
+                             juce::dontSendNotification);
+        phase.setValue (project.globalPhaseBeats, juce::dontSendNotification);
+    }
+
+private:
+    static int scoreEditorWidthFor (juce::Rectangle<int> area)
+    {
+        return juce::jlimit (280, 430, area.getWidth() / 3);
+    }
+
+    static void drawPatchGrid (juce::Graphics& g, juce::Rectangle<int> area)
+    {
+        g.setColour (juce::Colour (0xff202624));
+        g.fillRect (area);
+
+        g.setColour (juce::Colour (0xff2a312f));
+        for (auto x = area.getX(); x < area.getRight(); x += 24)
+            g.drawVerticalLine (x, static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
+
+        for (auto y = area.getY(); y < area.getBottom(); y += 24)
+            g.drawHorizontalLine (y, static_cast<float> (area.getX()), static_cast<float> (area.getRight()));
+
+        g.setColour (juce::Colour (0xff3a4642));
+        g.drawRect (area);
+    }
+
+    static void drawPatchCord (juce::Graphics& g, int x1, int y1, int x2, int y2)
+    {
+        juce::Path cord;
+        cord.startNewSubPath (static_cast<float> (x1), static_cast<float> (y1));
+        const auto tension = juce::jmax (32.0f, std::abs (static_cast<float> (x2 - x1)) * 0.45f);
+        cord.cubicTo (static_cast<float> (x1) + tension,
+                      static_cast<float> (y1),
+                      static_cast<float> (x2) - tension,
+                      static_cast<float> (y2),
+                      static_cast<float> (x2),
+                      static_cast<float> (y2));
+
+        g.setColour (juce::Colour (0xffcfd8d3).withAlpha (0.72f));
+        g.strokePath (cord, juce::PathStrokeType (2.0f));
+    }
+
+    static void drawStateNode (juce::Graphics& g, const StateModel& state, juce::Rectangle<int> node, int index, bool selected)
+    {
+        const auto language = state.tracks.empty() ? Language::chuck : state.tracks.front().language;
+        const auto base = languageColour (language);
+
+        g.setColour (juce::Colour (0xff121615));
+        g.fillRect (node);
+        g.setColour (base.withAlpha (0.92f));
+        g.drawRect (node, 2);
+        if (selected)
+        {
+            g.setColour (juce::Colour (0xfffff0a8));
+            g.drawRect (node.expanded (3), 2);
+        }
+
+        const auto inlet = juce::Rectangle<int> (node.getX() - 4, node.getCentreY() - 4, 8, 8);
+        const auto outlet = juce::Rectangle<int> (node.getRight() - 4, node.getCentreY() - 4, 8, 8);
+        g.fillRect (inlet);
+        g.fillRect (outlet);
+
+        auto text = node.reduced (10, 7);
+        g.setColour (juce::Colour (0xffeef4f1));
+        g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+        g.drawText (juce::String (index + 1) + "  " + state.name, text.removeFromTop (22), juce::Justification::centredLeft, true);
+        g.setColour (base.brighter (0.25f));
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (languageName (language), text.removeFromTop (18), juce::Justification::centredLeft, true);
+        g.setColour (juce::Colour (0xffcdd6d1));
+        g.drawText (juce::String (state.tracks.size()) + " tracks  "
+                        + juce::String (state.durationBeats, 1) + " + "
+                        + juce::String (state.tailBeats, 1),
+                    text,
+                    juce::Justification::centredLeft,
+                    true);
+    }
+
+    static void drawProgressLine (juce::Graphics& g, juce::Rectangle<int> lane, double normalised)
+    {
+        const auto x = lane.getX() + juce::roundToInt (lane.getWidth() * juce::jlimit (0.0, 1.0, normalised));
+        g.setColour (juce::Colour (0xfffff0a8));
+        g.drawLine (static_cast<float> (x), static_cast<float> (lane.getY()), static_cast<float> (x), static_cast<float> (lane.getBottom()), 2.0f);
+    }
+
+    ProjectModel& project;
+    SectionHeader title;
+    juce::TextButton playButton;
+    juce::TextButton stopButton;
+    juce::TextButton addStateButton;
+    juce::TextButton removeStateButton;
+    juce::TextButton runScoreButton;
+    juce::TextButton syncScoreButton;
+    juce::TextButton resetScoreButton;
+    juce::TextButton clearScoreButton;
+    juce::Slider tempo;
+    juce::ComboBox meter;
+    juce::Slider phase;
+    juce::TextEditor scoreScript;
+    bool isCountingIn = false;
+    bool isPlaying = false;
+    int selectedStateIndex = 0;
+    double currentBeat = 0.0;
+};
+
+class TrackEditorComponent final : public juce::Component
+{
+public:
+    explicit TrackEditorComponent (TrackModel& trackToUse)
+        : track (trackToUse)
+    {
+        name.setText (track.name, juce::dontSendNotification);
+        name.onTextChange = [this] { track.name = name.getText(); };
+        addAndMakeVisible (name);
+
+        language.addItem ("ChucK", 1);
+        language.addItem ("SuperCollider", 2);
+        language.addItem ("RTcmix", 3);
+        language.addItem ("Csound", 4);
+        language.addItem ("Faust", 5);
+        language.setSelectedId (indexForLanguage (track.language), juce::dontSendNotification);
+        language.onChange = [this]
+        {
+            track.language = languageFromIndex (language.getSelectedId());
+            if (track.code.trim().isEmpty())
+            {
+                track.code = defaultCodeForLanguage (track.language);
+                code.setText (track.code, false);
+            }
+
+            repaint();
+        };
+        addAndMakeVisible (language);
+
+        sync.setButtonText ("Sync");
+        sync.setToggleState (track.tightlySynced, juce::dontSendNotification);
+        sync.onClick = [this]
+        {
+            track.tightlySynced = sync.getToggleState();
+            updateTimingEnablement();
+        };
+        addAndMakeVisible (sync);
+
+        configureTimingSlider (tempo, 20.0, 300.0, track.tempoBpm);
+        tempo.onValueChange = [this] { track.tempoBpm = tempo.getValue(); };
+        addAndMakeVisible (tempo);
+
+        timeSig.addItem ("3/4", 1);
+        timeSig.addItem ("4/4", 2);
+        timeSig.addItem ("5/4", 3);
+        timeSig.addItem ("7/8", 4);
+        timeSig.setSelectedId (meterIdFor (track.timeSigNumerator, track.timeSigDenominator),
+                               juce::dontSendNotification);
+        timeSig.onChange = [this]
+        {
+            switch (timeSig.getSelectedId())
+            {
+                case 1: track.timeSigNumerator = 3; track.timeSigDenominator = 4; break;
+                case 3: track.timeSigNumerator = 5; track.timeSigDenominator = 4; break;
+                case 4: track.timeSigNumerator = 7; track.timeSigDenominator = 8; break;
+                default: track.timeSigNumerator = 4; track.timeSigDenominator = 4; break;
+            }
+        };
+        addAndMakeVisible (timeSig);
+
+        configureTimingSlider (phase, -8.0, 8.0, track.phaseBeats);
+        phase.onValueChange = [this] { track.phaseBeats = phase.getValue(); };
+        addAndMakeVisible (phase);
+
+        templateButton.setButtonText ("Template");
+        templateButton.onClick = [this]
+        {
+            track.code = defaultCodeForLanguage (track.language);
+            code.setText (track.code, false);
+        };
+        addAndMakeVisible (templateButton);
+
+        clearButton.setButtonText ("Clear");
+        clearButton.onClick = [this]
+        {
+            track.code.clear();
+            code.setText ({}, false);
+        };
+        addAndMakeVisible (clearButton);
+
+        configureCodeEditor (code, 14.0f);
+        code.setText (track.code, false);
+        code.onTextChange = [this] { track.code = code.getText(); };
+        addAndMakeVisible (code);
+
+        updateTimingEnablement();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto area = getLocalBounds();
+        g.setColour (juce::Colour (0xff1d2220));
+        g.fillRect (area);
+        g.setColour (languageColour (track.language).withAlpha (0.8f));
+        g.fillRect (area.removeFromLeft (4));
+        g.setColour (juce::Colour (0xff38433f));
+        g.drawRect (getLocalBounds());
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (10);
+        auto controls = area.removeFromTop (34);
+        name.setBounds (controls.removeFromLeft (160));
+        language.setBounds (controls.removeFromLeft (145).reduced (8, 0));
+        sync.setBounds (controls.removeFromLeft (74).reduced (4, 0));
+        tempo.setBounds (controls.removeFromLeft (170).reduced (8, 0));
+        timeSig.setBounds (controls.removeFromLeft (82).reduced (8, 0));
+        phase.setBounds (controls.removeFromLeft (150).reduced (8, 0));
+        templateButton.setBounds (controls.removeFromLeft (92).reduced (8, 0));
+        clearButton.setBounds (controls.removeFromLeft (68).reduced (4, 0));
+        code.setBounds (area.withTrimmedTop (8));
+    }
+
+private:
+    static void configureTimingSlider (juce::Slider& slider, double min, double max, double value)
+    {
+        slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 22);
+        slider.setRange (min, max, 0.01);
+        slider.setValue (value, juce::dontSendNotification);
+    }
+
+    void updateTimingEnablement()
+    {
+        const auto independent = ! track.tightlySynced;
+        tempo.setEnabled (independent);
+        timeSig.setEnabled (independent);
+        phase.setEnabled (independent);
+    }
+
+    TrackModel& track;
+    juce::TextEditor name;
+    juce::ComboBox language;
+    juce::ToggleButton sync;
+    juce::Slider tempo;
+    juce::ComboBox timeSig;
+    juce::Slider phase;
+    juce::TextButton templateButton;
+    juce::TextButton clearButton;
+    juce::TextEditor code;
+};
+
+class StateEditorComponent final : public juce::Component
+{
+public:
+    StateEditorComponent (StateModel& stateToUse, std::function<void()> addTrackCallback, std::function<void()> removeTrackCallback)
+        : state (stateToUse),
+          onAddTrack (std::move (addTrackCallback)),
+          onRemoveTrack (std::move (removeTrackCallback))
+    {
+        addAndMakeVisible (header);
+        header.setText (state.name);
+
+        duration.setSliderStyle (juce::Slider::LinearHorizontal);
+        duration.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 22);
+        duration.setRange (1.0, 256.0, 0.25);
+        duration.setValue (state.durationBeats);
+        duration.onValueChange = [this] { state.durationBeats = duration.getValue(); };
+        addAndMakeVisible (duration);
+
+        tail.setSliderStyle (juce::Slider::LinearHorizontal);
+        tail.setTextBoxStyle (juce::Slider::TextBoxRight, false, 58, 22);
+        tail.setRange (0.0, 64.0, 0.25);
+        tail.setValue (state.tailBeats);
+        tail.onValueChange = [this] { state.tailBeats = tail.getValue(); };
+        addAndMakeVisible (tail);
+
+        addAndMakeVisible (addTrackButton);
+        addTrackButton.setButtonText ("+ Track");
+        addTrackButton.onClick = [this]
+        {
+            if (onAddTrack != nullptr)
+                onAddTrack();
+        };
+
+        addAndMakeVisible (removeTrackButton);
+        removeTrackButton.setButtonText ("- Track");
+        removeTrackButton.onClick = [this]
+        {
+            if (onRemoveTrack != nullptr)
+                onRemoveTrack();
+        };
+
+        rebuildTrackEditors();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0xff101211));
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (16);
+        auto top = area.removeFromTop (34);
+        header.setBounds (top.removeFromLeft (190));
+        duration.setBounds (top.removeFromLeft (210).reduced (8, 0));
+        tail.setBounds (top.removeFromLeft (190).reduced (8, 0));
+        removeTrackButton.setBounds (top.removeFromRight (92).reduced (6, 0));
+        addTrackButton.setBounds (top.removeFromRight (92).reduced (6, 0));
+        area.removeFromTop (10);
+
+        const auto trackHeight = juce::jmax (124, area.getHeight() / juce::jmax (1, static_cast<int> (trackEditors.size())));
+        for (auto& editor : trackEditors)
+            editor->setBounds (area.removeFromTop (trackHeight).reduced (0, 5));
+    }
+
+private:
+    void rebuildTrackEditors()
+    {
+        trackEditors.clear();
+
+        for (auto& track : state.tracks)
+        {
+            auto editor = std::make_unique<TrackEditorComponent> (track);
+            addAndMakeVisible (*editor);
+            trackEditors.push_back (std::move (editor));
+        }
+    }
+
+    StateModel& state;
+    std::function<void()> onAddTrack;
+    std::function<void()> onRemoveTrack;
+    SectionHeader header;
+    juce::Slider duration;
+    juce::Slider tail;
+    juce::TextButton addTrackButton;
+    juce::TextButton removeTrackButton;
+    std::vector<std::unique_ptr<TrackEditorComponent>> trackEditors;
+};
+
+class ArrangementComponent final : public juce::Component
+{
+public:
+    explicit ArrangementComponent (ProjectModel& projectToUse)
+        : project (projectToUse)
+    {
+    }
+
+    void setTransport (bool countingInToUse, bool playingToUse, double countInBeatToUse, double beatToUse)
+    {
+        countingIn = countingInToUse;
+        playing = playingToUse;
+        countInBeat = countInBeatToUse;
+        currentBeat = beatToUse;
+        repaint();
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0xff101211));
+        auto area = getLocalBounds().reduced (18);
+        g.setColour (juce::Colour (0xffdce3e1));
+        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.drawText (countingIn ? "Arrangement: count-in" : "Arrangement", area.removeFromTop (30), juce::Justification::centredLeft, true);
+
+        const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
+        auto timeline = area.removeFromTop (juce::jmax (80, area.getHeight() / 4));
+        auto x = timeline.getX();
+
+        for (const auto& state : project.states)
+        {
+            const auto width = juce::roundToInt (timeline.getWidth() * state.durationBeats / totalBeats);
+            auto block = juce::Rectangle<int> (x, timeline.getY(), width - 4, timeline.getHeight());
+            g.setColour (juce::Colour (0xff202725));
+            g.fillRect (block);
+            g.setColour (juce::Colour (0xff53605c));
+            g.drawRect (block, 1);
+            g.setColour (juce::Colour (0xffedf2ef));
+            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.drawText (state.name, block.reduced (10), juce::Justification::centredLeft, true);
+            x += width;
+        }
+
+        if (playing)
+            drawPlayhead (g, timeline, currentBeat / totalBeats);
+
+        if (countingIn)
+        {
+            const auto countInProgress = countInBeat / juce::jmax (1.0, oneBarBeats (project));
+            g.setColour (juce::Colour (0xffffd36e));
+            g.fillRect (timeline.withWidth (juce::roundToInt (timeline.getWidth() * juce::jlimit (0.0, 1.0, countInProgress))).removeFromBottom (5));
+        }
+
+        area.removeFromTop (14);
+        drawTrackLanes (g, area);
+    }
+
+private:
+    static void drawPlayhead (juce::Graphics& g, juce::Rectangle<int> timeline, double normalised)
+    {
+        const auto x = timeline.getX() + juce::roundToInt (timeline.getWidth() * juce::jlimit (0.0, 1.0, normalised));
+        g.setColour (juce::Colour (0xfffff0a8));
+        g.drawLine (static_cast<float> (x), static_cast<float> (timeline.getY()), static_cast<float> (x), static_cast<float> (timeline.getBottom()), 2.5f);
+    }
+
+    void drawTrackLanes (juce::Graphics& g, juce::Rectangle<int> area)
+    {
+        int laneCount = 0;
+        for (const auto& state : project.states)
+            laneCount += static_cast<int> (state.tracks.size());
+
+        const auto laneHeight = juce::jmax (28, area.getHeight() / juce::jmax (1, laneCount));
+        const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
+
+        for (const auto& state : project.states)
+        {
+            for (const auto& track : state.tracks)
+            {
+                auto lane = area.removeFromTop (laneHeight).reduced (0, 3);
+                g.setColour (juce::Colour (0xff1b201f));
+                g.fillRect (lane);
+                g.setColour (languageColour (track.language).withAlpha (0.82f));
+                const auto clipWidth = juce::roundToInt (lane.getWidth() * state.durationBeats / totalBeats);
+                g.fillRect (lane.removeFromLeft (clipWidth));
+                g.setColour (juce::Colour (0xff101211));
+                g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+                g.drawText (state.name + " / " + track.name + " / " + languageName (track.language),
+                            lane.withX (area.getX()).withWidth (area.getWidth()).reduced (8, 0),
+                            juce::Justification::centredLeft,
+                            true);
+            }
+        }
+    }
+
+    ProjectModel& project;
+    bool countingIn = false;
+    bool playing = false;
+    double countInBeat = 0.0;
+    double currentBeat = 0.0;
+};
+
+class MixerComponent final : public juce::Component
+{
+public:
+    std::function<void()> onControlChange;
+
+    explicit MixerComponent (ProjectModel& projectToUse)
+        : project (projectToUse)
+    {
+        rebuild();
+    }
+
+    void refresh()
+    {
+        rebuild();
+        resized();
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (16);
+        auto title = area.removeFromTop (28);
+        titleBounds = title;
+        area.removeFromTop (12);
+
+        const auto channelWidth = juce::jlimit (86, 136, area.getWidth() / juce::jmax (1, static_cast<int> (channels.size())));
+        for (auto& channel : channels)
+            channel->setBounds (area.removeFromLeft (channelWidth).reduced (5, 0));
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0xff101211));
+        g.setColour (juce::Colour (0xffdce3e1));
+        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.drawText ("Mixer", titleBounds, juce::Justification::centredLeft, true);
+    }
+
+private:
+    class Channel final : public juce::Component
+    {
+    public:
+        Channel (TrackModel& trackToUse, std::function<void()> controlChangeCallback)
+            : track (trackToUse),
+              onControlChange (std::move (controlChangeCallback))
+        {
+            fader.setSliderStyle (juce::Slider::LinearVertical);
+            fader.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 58, 22);
+            fader.setRange (0.0, 1.0, 0.001);
+            fader.setValue (track.level);
+            fader.onValueChange = [this]
+            {
+                track.level = static_cast<float> (fader.getValue());
+                notifyControlChange();
+            };
+            addAndMakeVisible (fader);
+
+            mute.setButtonText ("M");
+            mute.setToggleState (track.muted, juce::dontSendNotification);
+            mute.onClick = [this]
+            {
+                track.muted = mute.getToggleState();
+                notifyControlChange();
+            };
+            addAndMakeVisible (mute);
+
+            solo.setButtonText ("S");
+            solo.setToggleState (track.soloed, juce::dontSendNotification);
+            solo.onClick = [this]
+            {
+                track.soloed = solo.getToggleState();
+                notifyControlChange();
+            };
+            addAndMakeVisible (solo);
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.setColour (juce::Colour (0xff1b201f));
+            g.fillRect (getLocalBounds());
+            g.setColour (languageColour (track.language));
+            g.fillRect (getLocalBounds().removeFromTop (4));
+            g.setColour (juce::Colour (0xffdce3e1));
+            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.drawFittedText (track.name, getLocalBounds().reduced (7).removeFromTop (38), juce::Justification::centred, 2);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (7);
+            area.removeFromTop (44);
+            auto buttons = area.removeFromBottom (30);
+            mute.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (2));
+            solo.setBounds (buttons.reduced (2));
+            fader.setBounds (area.reduced (6, 0));
+        }
+
+    private:
+        void notifyControlChange()
+        {
+            if (onControlChange != nullptr)
+                onControlChange();
+        }
+
+        TrackModel& track;
+        std::function<void()> onControlChange;
+        juce::Slider fader;
+        juce::TextButton mute;
+        juce::TextButton solo;
+    };
+
+    void rebuild()
+    {
+        channels.clear();
+
+        for (auto& state : project.states)
+        {
+            for (auto& track : state.tracks)
+            {
+                auto channel = std::make_unique<Channel> (track, [this]
+                {
+                    if (onControlChange != nullptr)
+                        onControlChange();
+                });
+                addAndMakeVisible (*channel);
+                channels.push_back (std::move (channel));
+            }
+        }
+    }
+
+    ProjectModel& project;
+    juce::Rectangle<int> titleBounds;
+    std::vector<std::unique_ptr<Channel>> channels;
+};
+
+class PerformanceController final : public juce::AudioIODeviceCallback
+{
+public:
+    PerformanceController()
+    {
+        deviceManager.initialise (0, 2, nullptr, true);
+        deviceManager.addAudioCallback (this);
+    }
+
+    ~PerformanceController() override
+    {
+        deviceManager.removeAudioCallback (this);
+        performance.release();
+    }
+
+    bool loadProject (const ProjectModel& project)
+    {
+        const juce::ScopedLock lock (engineLock);
+        pendingProject = project;
+        needsRebuild = true;
+
+        if (deviceSampleRate > 0.0)
+            return rebuildLocked();
+
+        return true;
+    }
+
+    bool updateTrackGains (const ProjectModel& project)
+    {
+        const juce::ScopedLock lock (engineLock);
+        pendingProject = project;
+
+        if (deviceSampleRate <= 0.0 || deviceBlockSize <= 0 || ! performance.isReady())
+            return true;
+
+        for (int stateIndex = 0; stateIndex < static_cast<int> (pendingProject.states.size()); ++stateIndex)
+        {
+            const auto& state = pendingProject.states[static_cast<size_t> (stateIndex)];
+            for (int trackIndex = 0; trackIndex < static_cast<int> (state.tracks.size()); ++trackIndex)
+            {
+                if (! performance.setTrackGain (stateIndex,
+                                                trackIndex,
+                                                effectiveTrackGain (pendingProject, stateIndex, trackIndex)))
+                {
+                    lastError = performance.getLastError();
+                    return false;
+                }
+            }
+        }
+
+        lastError.clear();
+        return true;
+    }
+
+    bool start()
+    {
+        const juce::ScopedLock lock (engineLock);
+
+        if (needsRebuild && ! rebuildLocked())
+            return false;
+
+        performance.resetToStart();
+        return performance.start();
+    }
+
+    void stop()
+    {
+        const juce::ScopedLock lock (engineLock);
+        performance.stop();
+    }
+
+    juce::String getLastError() const
+    {
+        const juce::ScopedLock lock (engineLock);
+        return lastError;
+    }
+
+    void audioDeviceAboutToStart (juce::AudioIODevice* device) override
+    {
+        const juce::ScopedLock lock (engineLock);
+        deviceSampleRate = device != nullptr ? device->getCurrentSampleRate() : 44100.0;
+        deviceBlockSize = device != nullptr ? device->getCurrentBufferSizeSamples() : 512;
+        deviceBlockSize = juce::jlimit (64, EmbeddedChucKEngine::maximumBlockSizeLimit, deviceBlockSize);
+        needsRebuild = true;
+        rebuildLocked();
+    }
+
+    void audioDeviceStopped() override
+    {
+        const juce::ScopedLock lock (engineLock);
+        performance.release();
+        scratchInput.setSize (0, 0);
+        scratchOutput.setSize (0, 0);
+        deviceSampleRate = 0.0;
+        deviceBlockSize = 0;
+        needsRebuild = true;
+    }
+
+    void audioDeviceIOCallbackWithContext (const float* const*,
+                                           int,
+                                           float* const* outputChannelData,
+                                           int numOutputChannels,
+                                           int numSamples,
+                                           const juce::AudioIODeviceCallbackContext&) override
+    {
+        juce::ScopedNoDenormals noDenormals;
+        clearOutputs (outputChannelData, numOutputChannels, numSamples);
+
+        const juce::ScopedLock lock (engineLock);
+        if (! performance.isReady() || ! performance.isPlaying() || numOutputChannels <= 0 || numSamples <= 0)
+            return;
+
+        if (numSamples > scratchOutput.getNumSamples())
+        {
+            performance.stop();
+            lastError = "Host audio block exceeded prepared GUI performance buffer";
+            return;
+        }
+
+        for (int channel = 0; channel < scratchOutput.getNumChannels(); ++channel)
+            scratchOutputPointers[static_cast<size_t> (channel)] = scratchOutput.getWritePointer (channel);
+
+        juce::AudioBuffer<float> outputView (scratchOutputPointers.data(),
+                                             scratchOutput.getNumChannels(),
+                                             numSamples);
+        outputView.clear();
+        performance.process (scratchInput, outputView);
+
+        const auto channelsToCopy = juce::jmin (numOutputChannels, scratchOutput.getNumChannels());
+        for (int channel = 0; channel < channelsToCopy; ++channel)
+            if (outputChannelData[channel] != nullptr)
+                juce::FloatVectorOperations::copy (outputChannelData[channel],
+                                                   scratchOutput.getReadPointer (channel),
+                                                   numSamples);
+    }
+
+private:
+    bool rebuildLocked()
+    {
+        needsRebuild = false;
+        performance.release();
+
+        if (deviceSampleRate <= 0.0 || deviceBlockSize <= 0)
+            return true;
+
+        scratchInput.setSize (0, deviceBlockSize, false, false, true);
+        scratchOutput.setSize (2, deviceBlockSize, false, false, true);
+        scratchInput.clear();
+        scratchOutput.clear();
+
+        if (! performance.prepare (deviceSampleRate, deviceBlockSize, 0, 2))
+        {
+            lastError = performance.getLastError();
+            return false;
+        }
+
+        performance.setTempoBpm (pendingProject.globalTempoBpm);
+        performance.setTempoMap ({ { 0.0, pendingProject.globalTempoBpm } });
+        performance.setTimeSignatureMap ({ { 0.0, pendingProject.globalTimeSigNumerator, pendingProject.globalTimeSigDenominator } });
+        performance.setPhaseRotationMap ({ { 0.0, pendingProject.globalPhaseBeats } });
+
+        std::vector<EmbeddedPerformanceEngine::State> sequence;
+        sequence.reserve (pendingProject.states.size());
+
+        for (int stateIndex = 0; stateIndex < static_cast<int> (pendingProject.states.size()); ++stateIndex)
+        {
+            const auto& state = pendingProject.states[static_cast<size_t> (stateIndex)];
+            EmbeddedPerformanceEngine::State performanceState;
+            performanceState.name = state.name;
+            performanceState.durationBeats = state.durationBeats;
+            performanceState.tailBeats = state.tailBeats;
+            performanceState.tracks.reserve (state.tracks.size());
+
+            for (int trackIndex = 0; trackIndex < static_cast<int> (state.tracks.size()); ++trackIndex)
+            {
+                const auto& track = state.tracks[static_cast<size_t> (trackIndex)];
+                performanceState.tracks.push_back ({ track.name,
+                                                     track.language,
+                                                     track.code,
+                                                     EmbeddedChucKEngine::getDefaultParameterBindings(),
+                                                     effectiveTrackGain (pendingProject, stateIndex, trackIndex),
+                                                     track.tightlySynced,
+                                                     track.tempoBpm,
+                                                     track.timeSigNumerator,
+                                                     track.timeSigDenominator,
+                                                     track.phaseBeats });
+            }
+
+            if (! performanceState.tracks.empty())
+                sequence.push_back (std::move (performanceState));
+        }
+
+        if (sequence.empty())
+        {
+            lastError = "GUI project has no playable tracks";
+            return false;
+        }
+
+        if (! performance.loadSequence (sequence))
+        {
+            lastError = performance.getLastError();
+            return false;
+        }
+
+        lastError.clear();
+        return true;
+    }
+
+    static void clearOutputs (float* const* outputChannelData, int numOutputChannels, int numSamples) noexcept
+    {
+        for (int channel = 0; channel < numOutputChannels; ++channel)
+            if (outputChannelData[channel] != nullptr)
+                juce::FloatVectorOperations::clear (outputChannelData[channel], numSamples);
+    }
+
+    mutable juce::CriticalSection engineLock;
+    juce::AudioDeviceManager deviceManager;
+    EmbeddedPerformanceEngine performance;
+    ProjectModel pendingProject = makeInitialProject();
+    juce::AudioBuffer<float> scratchInput;
+    juce::AudioBuffer<float> scratchOutput;
+    std::array<float*, EmbeddedChucKEngine::maximumChannelLimit> scratchOutputPointers {};
+    juce::String lastError;
+    double deviceSampleRate = 0.0;
+    int deviceBlockSize = 0;
+    bool needsRebuild = true;
+};
+
+class MainComponent final : public juce::Component, private juce::Timer
+{
+public:
+    MainComponent()
+        : project (makeInitialProject()),
+          score (project),
+          tabs (juce::TabbedButtonBar::TabsAtTop),
+          arrangement (project),
+          mixer (project)
+    {
+        setWantsKeyboardFocus (true);
+
+        addAndMakeVisible (score);
+        score.onPlay = [this] { startPlayback(); };
+        score.onStop = [this] { stopPlayback(); };
+        score.onAddState = [this] { addState(); };
+        score.onRemoveState = [this] { removeCurrentState(); };
+        score.onRunChucKScore = [this] { runChucKScoreScript (project.chuckScoreScript); };
+        score.onSyncChucKScore = [this] { syncChucKScoreScriptFromProject(); };
+        score.onResetChucKScore = [this]
+        {
+            project.chuckScoreScript = defaultChucKScoreScript();
+            score.setScoreScriptText (project.chuckScoreScript);
+        };
+        score.onSelectState = [this] (int index) { selectState (index); };
+
+        tabs.setOutline (0);
+        addAndMakeVisible (tabs);
+        rebuildTabs();
+
+        addChildComponent (arrangement);
+        addChildComponent (mixer);
+        mixer.onControlChange = [this] { refreshMixerControlChange (false); };
+
+        audio.loadProject (project);
+        prepareChucKScoreRunner();
+
+        startTimerHz (30);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        const auto topHeight = area.getHeight() / 3;
+        score.setBounds (area.removeFromTop (topHeight));
+        bottomBounds = area;
+        layoutBottomView();
+    }
+
+    void parentHierarchyChanged() override
+    {
+        grabKeyboardFocus();
+    }
+
+    bool keyPressed (const juce::KeyPress& key) override
+    {
+        if (key.getTextCharacter() == 'm' || key.getTextCharacter() == 'M')
+        {
+            mixerVisible = ! mixerVisible;
+            layoutBottomView();
+            return true;
+        }
+
+        if (key == juce::KeyPress::spaceKey)
+        {
+            if (playing || countingIn)
+                stopPlayback();
+            else
+                startPlayback();
+
+            return true;
+        }
+
+        return false;
+    }
+
+private:
+    using ScoreCommandId = ChucKScoreScript::CommandId;
+
+    enum class BottomView
+    {
+        stateTabs,
+        arrangement,
+        mixer
+    };
+
+    static constexpr int scoreChucKSampleRate = 48000;
+    static constexpr int scoreChucKBlockSize = 256;
+
+    void rebuildTabs()
+    {
+        const auto previousTab = tabs.getCurrentTabIndex();
+        tabs.clearTabs();
+
+        const auto count = juce::jmin (maxStateCount, static_cast<int> (project.states.size()));
+        for (int i = 0; i < count; ++i)
+        {
+            auto* editor = new StateEditorComponent (project.states[static_cast<size_t> (i)],
+                                                     [this, i] { addTrackToState (i); },
+                                                     [this, i] { removeTrackFromState (i); });
+            tabs.addTab (project.states[static_cast<size_t> (i)].name,
+                         juce::Colour (0xff1a1f1d),
+                         editor,
+                         true);
+        }
+
+        if (count > 0)
+            tabs.setCurrentTabIndex (juce::jlimit (0, count - 1, previousTab));
+    }
+
+    void selectState (int index)
+    {
+        if (index < 0 || index >= tabs.getNumTabs())
+            return;
+
+        tabs.setCurrentTabIndex (index);
+        score.setSelectedStateIndex (index);
+        currentView = BottomView::stateTabs;
+        mixerVisible = false;
+        layoutBottomView();
+    }
+
+    void syncChucKScoreScriptFromProject()
+    {
+        project.chuckScoreScript = generateChucKScoreScript (project);
+        score.setScoreScriptText (project.chuckScoreScript);
+    }
+
+    void addState()
+    {
+        addStateFromCommand (juce::String(), 16.0, 4.0, true);
+    }
+
+    bool addStateFromCommand (juce::String name, double durationBeats, double tailBeats, bool includeDefaultTrack)
+    {
+        if (static_cast<int> (project.states.size()) >= maxStateCount)
+            return false;
+
+        quietTransportForStructureEdit();
+        auto state = makeState (static_cast<int> (project.states.size()) + 1);
+        if (! includeDefaultTrack)
+            state.tracks.clear();
+        if (name.isNotEmpty())
+            state.name = std::move (name);
+        state.durationBeats = juce::jlimit (1.0, 256.0, durationBeats);
+        state.tailBeats = juce::jlimit (0.0, 64.0, tailBeats);
+        project.states.push_back (std::move (state));
+        refreshStructure (static_cast<int> (project.states.size()) - 1);
+        return true;
+    }
+
+    void removeCurrentState()
+    {
+        if (project.states.size() <= 1)
+            return;
+
+        const auto index = juce::jlimit (0, static_cast<int> (project.states.size()) - 1, tabs.getCurrentTabIndex());
+        removeStateAt (index);
+    }
+
+    bool removeStateAt (int index)
+    {
+        if (project.states.size() <= 1 || index < 0 || index >= static_cast<int> (project.states.size()))
+            return false;
+
+        quietTransportForStructureEdit();
+        project.states.erase (project.states.begin() + index);
+        refreshStructure (juce::jlimit (0, static_cast<int> (project.states.size()) - 1, index));
+        return true;
+    }
+
+    void addTrackToState (int stateIndex)
+    {
+        static_cast<void> (addTrackFromCommand (stateIndex, Language::chuck, juce::String()));
+    }
+
+    bool addTrackFromCommand (int stateIndex, Language language, juce::String name)
+    {
+        if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+            return false;
+
+        auto& state = project.states[static_cast<size_t> (stateIndex)];
+        if (static_cast<int> (state.tracks.size()) >= maxTrackCountPerState)
+            return false;
+
+        quietTransportForStructureEdit();
+        if (name.isEmpty())
+            name = "Track " + juce::String (static_cast<int> (state.tracks.size()) + 1);
+
+        state.tracks.push_back (makeTrack (std::move (name), language));
+        refreshStructure (stateIndex);
+        return true;
+    }
+
+    void removeTrackFromState (int stateIndex)
+    {
+        if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+            return;
+
+        auto& state = project.states[static_cast<size_t> (stateIndex)];
+        static_cast<void> (removeTrackAt (stateIndex, static_cast<int> (state.tracks.size()) - 1));
+    }
+
+    bool removeTrackAt (int stateIndex, int trackIndex)
+    {
+        if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+            return false;
+
+        auto& state = project.states[static_cast<size_t> (stateIndex)];
+        if (state.tracks.size() <= 1 || trackIndex < 0 || trackIndex >= static_cast<int> (state.tracks.size()))
+            return false;
+
+        quietTransportForStructureEdit();
+        state.tracks.erase (state.tracks.begin() + trackIndex);
+        refreshStructure (stateIndex);
+        return true;
+    }
+
+    void quietTransportForStructureEdit()
+    {
+        countingIn = false;
+        playing = false;
+        countInBeat = 0.0;
+        currentBeat = 0.0;
+        audio.stop();
+        currentView = BottomView::stateTabs;
+        mixerVisible = false;
+    }
+
+    void refreshStructure (int preferredTab)
+    {
+        rebuildTabs();
+        if (tabs.getNumTabs() > 0)
+            tabs.setCurrentTabIndex (juce::jlimit (0, tabs.getNumTabs() - 1, preferredTab));
+        score.setSelectedStateIndex (tabs.getNumTabs() > 0 ? tabs.getCurrentTabIndex() : 0);
+
+        mixer.refresh();
+        score.repaint();
+        arrangement.repaint();
+        audio.loadProject (project);
+        layoutBottomView();
+        updateTransportViews();
+    }
+
+    void refreshMixerControlChange (bool rebuildMixer)
+    {
+        if (rebuildMixer)
+            mixer.refresh();
+
+        static_cast<void> (audio.updateTrackGains (project));
+        score.repaint();
+        arrangement.repaint();
+        updateTransportViews();
+    }
+
+    void refreshScoreControlChange()
+    {
+        mixer.refresh();
+        score.repaint();
+        arrangement.repaint();
+        audio.loadProject (project);
+        updateTransportViews();
+    }
+
+    void startPlayback()
+    {
+        countingIn = true;
+        playing = false;
+        countInBeat = 0.0;
+        currentBeat = 0.0;
+        audio.loadProject (project);
+        currentView = BottomView::arrangement;
+        layoutBottomView();
+        updateTransportViews();
+    }
+
+    void stopPlayback()
+    {
+        countingIn = false;
+        playing = false;
+        countInBeat = 0.0;
+        currentBeat = 0.0;
+        audio.stop();
+        currentView = BottomView::stateTabs;
+        layoutBottomView();
+        updateTransportViews();
+    }
+
+    void timerCallback() override
+    {
+        const auto deltaBeats = beatsPerSecond (project.globalTempoBpm) / 30.0;
+
+        if (chuckScoreRunning)
+        {
+            advanceChucKScoreRunner (1.0 / 30.0);
+        }
+
+        if (countingIn)
+        {
+            countInBeat += deltaBeats;
+
+            if (countInBeat >= oneBarBeats (project))
+            {
+                countingIn = false;
+                playing = audio.start();
+                currentBeat = 0.0;
+
+                if (! playing)
+                    currentView = BottomView::stateTabs;
+            }
+        }
+        else if (playing)
+        {
+            currentBeat += deltaBeats;
+
+            if (currentBeat >= totalDurationBeats (project))
+            {
+                playing = false;
+                currentBeat = totalDurationBeats (project);
+            }
+        }
+
+        updateTransportViews();
+    }
+
+    void updateTransportViews()
+    {
+        score.setTransport (countingIn, playing, currentBeat);
+        arrangement.setTransport (countingIn, playing, countInBeat, currentBeat);
+    }
+
+    static juce::String decodeScoreText (juce::String text)
+    {
+        text = text.trim().unquoted();
+        if (! text.startsWithIgnoreCase ("base64:"))
+            return text;
+
+        juce::MemoryOutputStream decoded;
+        if (juce::Base64::convertFromBase64 (decoded, text.fromFirstOccurrenceOf (":", false, false)))
+            return decoded.toString();
+
+        return {};
+    }
+
+    void prepareChucKScoreRunner()
+    {
+        if (chuckScorePrepared)
+            return;
+
+        chuckScoreInput.setSize (0, scoreChucKBlockSize);
+        chuckScoreOutput.setSize (1, scoreChucKBlockSize);
+        chuckScorePrepared = scoreChucK.prepare (scoreChucKSampleRate, scoreChucKBlockSize, 0, 1);
+
+        if (! chuckScorePrepared)
+            juce::Logger::writeToLog ("ChucK score runner prepare failed: " + scoreChucK.getLastError());
+    }
+
+    void runChucKScoreScript (const juce::String& script)
+    {
+        prepareChucKScoreRunner();
+        if (! chuckScorePrepared)
+        {
+            chuckScoreRunning = false;
+            return;
+        }
+
+        auto program = ChucKScoreScript::buildProgram (script);
+        const auto bindings = ChucKScoreScript::getParameterBindings();
+
+        chuckScoreRunning = false;
+        if (! scoreChucK.loadProgram (program.source, bindings))
+        {
+            juce::Logger::writeToLog ("ChucK score script compile failed: " + scoreChucK.getLastError());
+            return;
+        }
+
+        scoreCommandParameterIndex = scoreChucK.getParameterIndex ("weldScoreCommand");
+        for (int i = 0; i < ChucKScoreScript::argumentCount; ++i)
+            scoreArgumentParameterIndices[static_cast<size_t> (i)] = scoreChucK.getParameterIndex ("weldScoreArg" + juce::String (i));
+
+        if (scoreCommandParameterIndex < 0)
+        {
+            juce::Logger::writeToLog ("ChucK score script bridge command slot is unavailable");
+            return;
+        }
+
+        for (const auto index : scoreArgumentParameterIndices)
+        {
+            if (index < 0)
+            {
+                juce::Logger::writeToLog ("ChucK score script bridge argument slots are unavailable");
+                return;
+            }
+        }
+
+        scoreChucK.setParameterValue (scoreCommandParameterIndex, 0.0f);
+        chuckScoreRunning = true;
+        advanceChucKScoreRunner (1.0 / 30.0);
+    }
+
+    juce::String scoreText (int index) const
+    {
+        return scoreChucK.getGlobalStringValue ("weldScoreText" + juce::String (index));
+    }
+
+    void advanceChucKScoreRunner (double seconds)
+    {
+        if (! chuckScoreRunning || ! scoreChucK.isReady())
+            return;
+
+        auto framesRemaining = juce::jlimit (1, scoreChucKSampleRate, juce::roundToInt (seconds * scoreChucKSampleRate));
+        int guard = scoreChucKSampleRate;
+
+        while (chuckScoreRunning && framesRemaining > 0 && guard-- > 0)
+        {
+            if (drainChucKScoreCommand())
+                continue;
+
+            const auto framesThisChunk = juce::jmin (64, framesRemaining);
+            chuckScoreInput.setSize (0, framesThisChunk, false, false, true);
+            chuckScoreOutput.setSize (1, framesThisChunk, false, false, true);
+            chuckScoreOutput.clear();
+            scoreChucK.process (chuckScoreInput, chuckScoreOutput);
+            scoreChucK.pullParameterValuesFromGlobals();
+            framesRemaining -= framesThisChunk;
+        }
+
+        static_cast<void> (drainChucKScoreCommand());
+    }
+
+    bool drainChucKScoreCommand()
+    {
+        if (scoreCommandParameterIndex < 0)
+            return false;
+
+        const auto commandId = juce::roundToInt (scoreChucK.getParameterValue (scoreCommandParameterIndex));
+        if (commandId == 0)
+            return false;
+
+        std::array<double, ChucKScoreScript::argumentCount> args {};
+        for (int i = 0; i < ChucKScoreScript::argumentCount; ++i)
+        {
+            const auto parameterIndex = scoreArgumentParameterIndices[static_cast<size_t> (i)];
+            if (parameterIndex >= 0)
+                args[static_cast<size_t> (i)] = scoreChucK.getParameterValue (parameterIndex);
+        }
+
+        executeChucKScoreCommand (static_cast<ScoreCommandId> (commandId), args);
+        scoreChucK.setParameterValue (scoreCommandParameterIndex, 0.0f);
+        if (commandId == static_cast<int> (ScoreCommandId::scoreComplete))
+            acknowledgeChucKScoreCommand();
+        return true;
+    }
+
+    void acknowledgeChucKScoreCommand()
+    {
+        chuckScoreInput.setSize (0, 1, false, false, true);
+        chuckScoreOutput.setSize (1, 1, false, false, true);
+        chuckScoreOutput.clear();
+        scoreChucK.process (chuckScoreInput, chuckScoreOutput);
+        scoreChucK.pullParameterValuesFromGlobals();
+    }
+
+    void executeChucKScoreCommand (ScoreCommandId command, const std::array<double, ChucKScoreScript::argumentCount>& args)
+    {
+        const auto stateIndex = [] (double value) { return juce::roundToInt (value) - 1; };
+        const auto trackIndex = [] (double value) { return juce::roundToInt (value) - 1; };
+
+        switch (command)
+        {
+            case ScoreCommandId::scoreClear:
+                quietTransportForStructureEdit();
+                project.states.clear();
+                refreshStructure (0);
+                break;
+
+            case ScoreCommandId::scoreComplete:
+                chuckScoreRunning = false;
+                break;
+
+            case ScoreCommandId::play:
+                startPlayback();
+                break;
+
+            case ScoreCommandId::stop:
+                stopPlayback();
+                break;
+
+            case ScoreCommandId::tempo:
+                project.globalTempoBpm = juce::jlimit (20.0, 300.0, args[0]);
+                audio.loadProject (project);
+                score.syncControlsFromProject();
+                score.repaint();
+                break;
+
+            case ScoreCommandId::meter:
+                project.globalTimeSigNumerator = juce::jlimit (1, 32, juce::roundToInt (args[0]));
+                project.globalTimeSigDenominator = juce::jlimit (1, 32, juce::roundToInt (args[1]));
+                audio.loadProject (project);
+                score.syncControlsFromProject();
+                score.repaint();
+                break;
+
+            case ScoreCommandId::phase:
+                project.globalPhaseBeats = args[0];
+                audio.loadProject (project);
+                score.syncControlsFromProject();
+                score.repaint();
+                break;
+
+            case ScoreCommandId::stateAdd:
+                static_cast<void> (addStateFromCommand (scoreText (0), args[1], args[2], false));
+                break;
+
+            case ScoreCommandId::stateRemove:
+                static_cast<void> (removeStateAt (stateIndex (args[0])));
+                break;
+
+            case ScoreCommandId::stateDuration:
+            case ScoreCommandId::stateTail:
+            {
+                const auto index = stateIndex (args[0]);
+                if (index >= 0 && index < static_cast<int> (project.states.size()))
+                {
+                    auto& stateToEdit = project.states[static_cast<size_t> (index)];
+                    quietTransportForStructureEdit();
+                    if (command == ScoreCommandId::stateDuration)
+                        stateToEdit.durationBeats = juce::jlimit (1.0, 256.0, args[1]);
+                    else
+                        stateToEdit.tailBeats = juce::jlimit (0.0, 64.0, args[1]);
+                    refreshStructure (index);
+                }
+                break;
+            }
+
+            case ScoreCommandId::stateName:
+            {
+                const auto index = stateIndex (args[0]);
+                if (index >= 0 && index < static_cast<int> (project.states.size()))
+                {
+                    project.states[static_cast<size_t> (index)].name = scoreText (0);
+                    refreshStructure (index);
+                }
+                break;
+            }
+
+            case ScoreCommandId::stateSelect:
+                selectState (stateIndex (args[0]));
+                break;
+
+            case ScoreCommandId::trackAdd:
+                static_cast<void> (addTrackFromCommand (stateIndex (args[0]),
+                                                        languageFromName (scoreText (1)),
+                                                        scoreText (0)));
+                break;
+
+            case ScoreCommandId::trackRemove:
+                static_cast<void> (removeTrackAt (stateIndex (args[0]), trackIndex (args[1])));
+                break;
+
+            case ScoreCommandId::trackName:
+            case ScoreCommandId::trackLanguage:
+            case ScoreCommandId::trackGain:
+            case ScoreCommandId::trackSync:
+            case ScoreCommandId::trackTempo:
+            case ScoreCommandId::trackMeter:
+            case ScoreCommandId::trackPhase:
+            case ScoreCommandId::trackCode:
+            case ScoreCommandId::trackTemplate:
+            case ScoreCommandId::trackClear:
+            case ScoreCommandId::trackMute:
+            case ScoreCommandId::trackSolo:
+                applyChucKScoreTrackCommand (command, stateIndex (args[0]), trackIndex (args[1]), args);
+                break;
+
+            case ScoreCommandId::mixer:
+                mixerVisible = args[0] != 0.0;
+                layoutBottomView();
+                break;
+
+            case ScoreCommandId::none:
+                break;
+        }
+    }
+
+    void applyChucKScoreTrackCommand (ScoreCommandId command,
+                                      int stateIndex,
+                                      int trackIndex,
+                                      const std::array<double, ChucKScoreScript::argumentCount>& args)
+    {
+        if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+            return;
+
+        auto& stateToEdit = project.states[static_cast<size_t> (stateIndex)];
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (stateToEdit.tracks.size()))
+            return;
+
+        auto& track = stateToEdit.tracks[static_cast<size_t> (trackIndex)];
+        const auto structuralEdit = command == ScoreCommandId::trackName
+                                 || command == ScoreCommandId::trackLanguage
+                                 || command == ScoreCommandId::trackCode
+                                 || command == ScoreCommandId::trackTemplate
+                                 || command == ScoreCommandId::trackClear;
+
+        if (structuralEdit)
+            quietTransportForStructureEdit();
+
+        if (command == ScoreCommandId::trackName)
+            track.name = scoreText (0);
+        else if (command == ScoreCommandId::trackLanguage)
+        {
+            track.language = languageFromName (scoreText (0));
+            if (track.code.trim().isEmpty())
+                track.code = defaultCodeForLanguage (track.language);
+        }
+        else if (command == ScoreCommandId::trackGain)
+            track.level = juce::jlimit (0.0f, 1.0f, static_cast<float> (args[2]));
+        else if (command == ScoreCommandId::trackSync)
+            track.tightlySynced = args[2] != 0.0;
+        else if (command == ScoreCommandId::trackTempo)
+            track.tempoBpm = juce::jlimit (20.0, 300.0, args[2]);
+        else if (command == ScoreCommandId::trackMeter)
+        {
+            track.timeSigNumerator = juce::jlimit (1, 32, juce::roundToInt (args[2]));
+            track.timeSigDenominator = juce::jlimit (1, 32, juce::roundToInt (args[3]));
+        }
+        else if (command == ScoreCommandId::trackPhase)
+            track.phaseBeats = args[2];
+        else if (command == ScoreCommandId::trackCode)
+            track.code = decodeScoreText (scoreText (0));
+        else if (command == ScoreCommandId::trackTemplate)
+            track.code = defaultCodeForLanguage (track.language);
+        else if (command == ScoreCommandId::trackClear)
+            track.code.clear();
+        else if (command == ScoreCommandId::trackMute)
+            track.muted = args[2] != 0.0;
+        else if (command == ScoreCommandId::trackSolo)
+            track.soloed = args[2] != 0.0;
+
+        if (structuralEdit)
+            refreshStructure (stateIndex);
+        else if (command == ScoreCommandId::trackGain
+                 || command == ScoreCommandId::trackMute
+                 || command == ScoreCommandId::trackSolo)
+            refreshMixerControlChange (true);
+        else
+            refreshScoreControlChange();
+    }
+
+    void layoutBottomView()
+    {
+        const auto view = mixerVisible ? BottomView::mixer : currentView;
+
+        tabs.setVisible (view == BottomView::stateTabs);
+        arrangement.setVisible (view == BottomView::arrangement);
+        mixer.setVisible (view == BottomView::mixer);
+
+        tabs.setBounds (bottomBounds);
+        arrangement.setBounds (bottomBounds);
+        mixer.setBounds (bottomBounds);
+    }
+
+    ProjectModel project;
+    PerformanceController audio;
+    EmbeddedChucKEngine scoreChucK;
+    ScoreMachineComponent score;
+    juce::TabbedComponent tabs;
+    ArrangementComponent arrangement;
+    MixerComponent mixer;
+    juce::AudioBuffer<float> chuckScoreInput;
+    juce::AudioBuffer<float> chuckScoreOutput;
+    juce::Rectangle<int> bottomBounds;
+    BottomView currentView = BottomView::stateTabs;
+    bool mixerVisible = false;
+    bool countingIn = false;
+    bool playing = false;
+    bool chuckScorePrepared = false;
+    bool chuckScoreRunning = false;
+    double countInBeat = 0.0;
+    double currentBeat = 0.0;
+    int scoreCommandParameterIndex = -1;
+    std::array<int, ChucKScoreScript::argumentCount> scoreArgumentParameterIndices {};
+};
+
+class MainWindow final : public juce::DocumentWindow
+{
+public:
+    explicit MainWindow (juce::String name)
+        : DocumentWindow (std::move (name),
+                          juce::Colour (0xff101211),
+                          juce::DocumentWindow::closeButton)
+    {
+        setUsingNativeTitleBar (false);
+        setResizable (true, false);
+        setContentOwned (new MainComponent(), true);
+        centreWithSize (1280, 800);
+        setFullScreen (true);
+        setVisible (true);
+    }
+
+    void closeButtonPressed() override
+    {
+        juce::JUCEApplication::getInstance()->systemRequestedQuit();
+    }
+};
+
+class WeldChucKGuiApplication final : public juce::JUCEApplication
+{
+public:
+    const juce::String getApplicationName() override { return "Weld ChucK GUI"; }
+    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    bool moreThanOneInstanceAllowed() override { return true; }
+
+    void initialise (const juce::String&) override
+    {
+        mainWindow = std::make_unique<MainWindow> (getApplicationName());
+    }
+
+    void shutdown() override
+    {
+        mainWindow = nullptr;
+    }
+
+    void systemRequestedQuit() override
+    {
+        quit();
+    }
+
+private:
+    std::unique_ptr<MainWindow> mainWindow;
+};
+} // namespace
+
+START_JUCE_APPLICATION (WeldChucKGuiApplication)

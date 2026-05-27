@@ -2,6 +2,8 @@
 
 # Local build products
 build/
+build-csound/
+build-supercollider-host/
 cmake-build-*/
 out/
 
@@ -13,3 +15,14 @@ CMakeUserPresets.json
 .idea/
 .vscode/
 *.swp
+
+# Locally cloned optional language runtimes. Recreate these from README.md
+# and apply patches from third_party/patches when needed.
+third_party/csound/
+third_party/local/
+third_party/purr-data/
+third_party/rtcmix/
+third_party/supercollider/
+third_party/tool_src/
+!third_party/patches/
+!third_party/patches/**

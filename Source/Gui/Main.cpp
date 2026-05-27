@@ -479,8 +479,7 @@ juce::String demoChucKCodaCode()
            "    110.0 * Math.pow(2.0, semitone / 12.0) => float base;\n"
            "    base * 2.0 => answer.freq;\n"
            "    base * 4.0 => glow.freq;\n"
-           "    Math.max(0.38, 1.0 - (hostStateBeat / 14.0)) => float settle;\n"
-           "    Math.max(0.0, Math.min(hostGain, 0.048)) * hostStateGain * hostTrackGain * settle => mix.gain;\n"
+           "    Math.max(0.0, Math.min(hostGain, 0.048)) * hostStateGain * hostTrackGain => mix.gain;\n"
            "    1::samp => now;\n"
            "}\n";
 }
@@ -548,7 +547,7 @@ juce::String defaultChucKScoreScript()
     return "score.clear();\n"
            "tempo(120);\n"
            "meter(4, 4);\n"
-           "state.add(\"Motif\", 16, 5);\n"
+           "state.add(\"Motif\", 16, 0);\n"
            "track.add(1, \"ChucK pulse canon\", \"chuck\");\n"
            "track.gain(1, 1, 0.46);\n"
            "track.add(1, \"Upper response\", \"chuck\");\n"
@@ -557,7 +556,7 @@ juce::String defaultChucKScoreScript()
            "track.gain(1, 3, 0.38);\n"
            "track.add(1, \"Inner fifth\", \"chuck\");\n"
            "track.gain(1, 4, 0.40);\n"
-           "state.add(\"Glass branch\", 12, 6);\n"
+           "state.add(\"Glass branch\", 12, 0);\n"
            "track.add(2, \"SC glass harmonics\", \"supercollider\");\n"
            "track.gain(2, 1, 0.46);\n"
            "track.add(2, \"ChucK halo\", \"chuck\");\n"
@@ -566,7 +565,7 @@ juce::String defaultChucKScoreScript()
            "track.gain(2, 3, 0.38);\n"
            "track.add(2, \"ChucK high pin\", \"chuck\");\n"
            "track.gain(2, 4, 0.34);\n"
-           "state.add(\"Low branch\", 20, 6);\n"
+           "state.add(\"Low branch\", 20, 0);\n"
            "track.add(3, \"RTcmix low pedal\", \"rtcmix\");\n"
            "track.gain(3, 1, 0.44);\n"
            "track.add(3, \"ChucK pedal octave\", \"chuck\");\n"
@@ -575,7 +574,7 @@ juce::String defaultChucKScoreScript()
            "track.gain(3, 3, 0.38);\n"
            "track.add(3, \"ChucK low shimmer\", \"chuck\");\n"
            "track.gain(3, 4, 0.36);\n"
-           "state.add(\"Coda\", 10, 5);\n"
+           "state.add(\"Coda\", 10, 0);\n"
            "track.add(4, \"ChucK answer\", \"chuck\");\n"
            "track.gain(4, 1, 0.42);\n"
            "track.add(4, \"ChucK coda glow\", \"chuck\");\n"
@@ -819,7 +818,7 @@ ProjectModel makeInitialProject()
     StateModel chuck;
     chuck.name = "Motif";
     chuck.durationBeats = 16.0;
-    chuck.tailBeats = 5.0;
+    chuck.tailBeats = 0.0;
     chuck.canvasX = 70;
     chuck.canvasY = 160;
     chuck.tracks.push_back ({ "ChucK pulse canon",
@@ -841,7 +840,7 @@ ProjectModel makeInitialProject()
     StateModel sc;
     sc.name = "Glass branch";
     sc.durationBeats = 12.0;
-    sc.tailBeats = 6.0;
+    sc.tailBeats = 0.0;
     sc.canvasX = 330;
     sc.canvasY = 60;
     sc.tracks.push_back ({ "SC glass harmonics",
@@ -863,7 +862,7 @@ ProjectModel makeInitialProject()
     StateModel rtcmix;
     rtcmix.name = "Low branch";
     rtcmix.durationBeats = 20.0;
-    rtcmix.tailBeats = 6.0;
+    rtcmix.tailBeats = 0.0;
     rtcmix.canvasX = 330;
     rtcmix.canvasY = 230;
     rtcmix.tracks.push_back ({ "RTcmix low pedal",
@@ -885,7 +884,7 @@ ProjectModel makeInitialProject()
     StateModel coda;
     coda.name = "Coda";
     coda.durationBeats = 10.0;
-    coda.tailBeats = 5.0;
+    coda.tailBeats = 0.0;
     coda.canvasX = 590;
     coda.canvasY = 160;
     coda.tracks.push_back ({ "ChucK answer",

@@ -292,13 +292,18 @@ void arrangeStatesAsFiniteStateMachine (ProjectModel& project)
     if (project.states.empty())
         return;
 
+    constexpr int columnSpacing = 260;
+    constexpr int leftMargin = 70;
+    constexpr int centreY = 160;
+    constexpr int branchSpacing = 130;
+
     if (! projectHasExplicitTransitions (project))
     {
         for (int i = 0; i < static_cast<int> (project.states.size()); ++i)
         {
             auto& state = project.states[static_cast<size_t> (i)];
-            state.canvasX = 70 + i * 260;
-            state.canvasY = 160;
+            state.canvasX = leftMargin + i * columnSpacing;
+            state.canvasY = centreY;
         }
 
         return;
@@ -345,51 +350,10 @@ void arrangeStatesAsFiniteStateMachine (ProjectModel& project)
         for (int slot = 0; slot < count; ++slot)
         {
             auto& state = project.states[static_cast<size_t> (column[static_cast<size_t> (slot)])];
-            state.canvasX = 70 + columnIndex * 260;
-            state.canvasY = count <= 1 ? 160 : 60 + slot * 170;
+            state.canvasX = leftMargin + columnIndex * columnSpacing;
+            state.canvasY = count <= 1 ? centreY : centreY - ((count - 1) * branchSpacing) / 2 + slot * branchSpacing;
         }
     }
-}
-
-std::vector<juce::Rectangle<int>> stateNodeBounds (const ProjectModel& project,
-                                                   juce::Rectangle<int> patchArea,
-                                                   int nodeWidth,
-                                                   int nodeHeight)
-{
-    std::vector<juce::Rectangle<int>> nodes;
-    nodes.reserve (project.states.size());
-
-    if (project.states.empty())
-        return nodes;
-
-    auto minX = project.states.front().canvasX;
-    auto maxX = project.states.front().canvasX;
-    auto minY = project.states.front().canvasY;
-    auto maxY = project.states.front().canvasY;
-
-    for (const auto& state : project.states)
-    {
-        minX = juce::jmin (minX, state.canvasX);
-        maxX = juce::jmax (maxX, state.canvasX);
-        minY = juce::jmin (minY, state.canvasY);
-        maxY = juce::jmax (maxY, state.canvasY);
-    }
-
-    const auto usableWidth = juce::jmax (1, patchArea.getWidth() - nodeWidth);
-    const auto usableHeight = juce::jmax (1, patchArea.getHeight() - nodeHeight);
-    const auto spanX = juce::jmax (1, maxX - minX);
-    const auto spanY = juce::jmax (1, maxY - minY);
-
-    for (const auto& state : project.states)
-    {
-        const auto normalisedX = project.states.size() <= 1 ? 0.5 : static_cast<double> (state.canvasX - minX) / spanX;
-        const auto normalisedY = maxY == minY ? 0.5 : static_cast<double> (state.canvasY - minY) / spanY;
-        const auto x = patchArea.getX() + juce::roundToInt (usableWidth * normalisedX);
-        const auto y = patchArea.getY() + juce::roundToInt (usableHeight * normalisedY);
-        nodes.push_back ({ x, y, nodeWidth, nodeHeight });
-    }
-
-    return nodes;
 }
 
 int meterIdFor (int numerator, int denominator) noexcept
@@ -435,6 +399,11 @@ void configureCodeEditor (juce::TextEditor& editor, float fontSize = 13.0f)
     editor.setColour (juce::TextEditor::highlightedTextColourId, juce::Colours::white);
     editor.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff33403c));
     editor.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (0xff84c7b6));
+}
+
+void setCodeEditorFontSize (juce::TextEditor& editor, float fontSize)
+{
+    editor.setFont (juce::FontOptions (fontSize));
 }
 
 juce::String demoChucKMotifCode()
@@ -929,6 +898,40 @@ public:
         addAndMakeVisible (title);
         title.setText ("Score / State Machine");
 
+        addAndMakeVisible (zoomOutButton);
+        zoomOutButton.setButtonText ("-");
+        zoomOutButton.onClick = [this]
+        {
+            userAdjustedGraphView = true;
+            zoomGraphFromCentre (1.0f / 1.18f);
+        };
+
+        addAndMakeVisible (zoomInButton);
+        zoomInButton.setButtonText ("+");
+        zoomInButton.onClick = [this]
+        {
+            userAdjustedGraphView = true;
+            zoomGraphFromCentre (1.18f);
+        };
+
+        addAndMakeVisible (fitGraphButton);
+        fitGraphButton.setButtonText ("Fit");
+        fitGraphButton.onClick = [this]
+        {
+            userAdjustedGraphView = true;
+            fitGraphToView();
+        };
+
+        addAndMakeVisible (arrangeGraphButton);
+        arrangeGraphButton.setButtonText ("Arrange");
+        arrangeGraphButton.onClick = [this]
+        {
+            arrangeStatesAsFiniteStateMachine (project);
+            userAdjustedGraphView = true;
+            fitGraphToView();
+            repaint();
+        };
+
         addAndMakeVisible (playButton);
         playButton.setButtonText ("Play");
         playButton.onClick = [this]
@@ -1035,6 +1038,14 @@ public:
             scoreScript.setText ({}, false);
         };
 
+        addAndMakeVisible (scoreFontDownButton);
+        scoreFontDownButton.setButtonText ("A-");
+        scoreFontDownButton.onClick = [this] { setScoreFontSize (scoreFontSize - 1.0f); };
+
+        addAndMakeVisible (scoreFontUpButton);
+        scoreFontUpButton.setButtonText ("A+");
+        scoreFontUpButton.onClick = [this] { setScoreFontSize (scoreFontSize + 1.0f); };
+
         addAndMakeVisible (scoreScript);
         configureCodeEditor (scoreScript);
         scoreScript.setText (project.chuckScoreScript, false);
@@ -1058,54 +1069,67 @@ public:
         const auto editorWidth = scoreEditorWidthFor (area);
         area.removeFromRight (editorWidth + 12);
 
-        drawPatchGrid (g, area);
+        drawPatchGrid (g, area, viewportZoom, viewportPan);
 
         auto timeline = area.removeFromBottom (34).reduced (14, 7);
         auto patchArea = area.reduced (14);
         patchArea.removeFromBottom (14);
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
 
-        const auto nodeWidth = juce::jlimit (112, 188, patchArea.getWidth() / juce::jmax (1, static_cast<int> (project.states.size())) - 14);
-        const auto nodeHeight = juce::jlimit (62, 92, patchArea.getHeight() - 20);
-        const auto nodes = stateNodeBounds (project, patchArea, nodeWidth, nodeHeight);
+        const auto nodes = transformedStateNodeBounds (patchArea, currentNodeWidth(), currentNodeHeight());
+        const auto activeState = activeStateForBeat (currentBeat);
 
-        auto drewExplicitConnection = false;
-        for (size_t i = 0; i < project.states.size(); ++i)
         {
-            const auto& state = project.states[i];
-            auto totalWeight = 0.0;
-            for (const auto& transition : state.transitions)
-                if (transition.targetStateIndex >= 0
-                    && transition.targetStateIndex < static_cast<int> (nodes.size())
-                    && transition.weight > 0.0
-                    && std::isfinite (transition.weight))
-                    totalWeight += transition.weight;
+            juce::Graphics::ScopedSaveState graphState (g);
+            g.reduceClipRegion (patchArea);
 
-            for (const auto& transition : state.transitions)
+            auto drewExplicitConnection = false;
+            for (size_t i = 0; i < project.states.size(); ++i)
             {
-                if (transition.targetStateIndex < 0
-                    || transition.targetStateIndex >= static_cast<int> (nodes.size())
-                    || transition.weight <= 0.0
-                    || ! std::isfinite (transition.weight))
-                    continue;
+                const auto& state = project.states[i];
+                auto totalWeight = 0.0;
+                for (const auto& transition : state.transitions)
+                    if (transition.targetStateIndex >= 0
+                        && transition.targetStateIndex < static_cast<int> (nodes.size())
+                        && transition.weight > 0.0
+                        && std::isfinite (transition.weight))
+                        totalWeight += transition.weight;
 
-                const auto probability = totalWeight > 0.0 ? transition.weight / totalWeight : transition.weight;
-                drawPatchCord (g,
-                               nodes[i].getRight(),
-                               nodes[i].getCentreY(),
-                               nodes[static_cast<size_t> (transition.targetStateIndex)].getX(),
-                               nodes[static_cast<size_t> (transition.targetStateIndex)].getCentreY(),
-                               probability);
-                drewExplicitConnection = true;
+                for (const auto& transition : state.transitions)
+                {
+                    if (transition.targetStateIndex < 0
+                        || transition.targetStateIndex >= static_cast<int> (nodes.size())
+                        || transition.weight <= 0.0
+                        || ! std::isfinite (transition.weight))
+                        continue;
+
+                    const auto probability = totalWeight > 0.0 ? transition.weight / totalWeight : transition.weight;
+                    drawPatchCord (g,
+                                   nodes[i].getRight(),
+                                   nodes[i].getCentreY(),
+                                   nodes[static_cast<size_t> (transition.targetStateIndex)].getX(),
+                                   nodes[static_cast<size_t> (transition.targetStateIndex)].getCentreY(),
+                                   probability);
+                    drewExplicitConnection = true;
+                }
+            }
+
+            if (! drewExplicitConnection)
+                for (size_t i = 1; i < nodes.size(); ++i)
+                    drawPatchCord (g, nodes[i - 1].getRight(), nodes[i - 1].getCentreY(), nodes[i].getX(), nodes[i].getCentreY(), 1.0);
+
+            for (size_t i = 0; i < project.states.size(); ++i)
+            {
+                const auto index = static_cast<int> (i);
+                drawStateNode (g,
+                               project.states[i],
+                               nodes[i],
+                               index,
+                               index == selectedStateIndex,
+                               activeState.index == index,
+                               activeState.progress);
             }
         }
-
-        if (! drewExplicitConnection)
-            for (size_t i = 1; i < nodes.size(); ++i)
-                drawPatchCord (g, nodes[i - 1].getRight(), nodes[i - 1].getCentreY(), nodes[i].getX(), nodes[i].getCentreY(), 1.0);
-
-        for (size_t i = 0; i < project.states.size(); ++i)
-            drawStateNode (g, project.states[i], nodes[i], static_cast<int> (i), static_cast<int> (i) == selectedStateIndex);
 
         double stateStart = 0.0;
         const auto order = playableArrangementOrder (project);
@@ -1142,17 +1166,22 @@ public:
     {
         auto area = getLocalBounds().reduced (18);
         auto top = area.removeFromTop (36);
+        const auto editorWidth = scoreEditorWidthFor (area);
+        top.removeFromRight (editorWidth + 12);
         title.setBounds (top.removeFromLeft (230));
-        playButton.setBounds (top.removeFromRight (76));
-        stopButton.setBounds (top.removeFromRight (76).reduced (8, 0));
-        removeStateButton.setBounds (top.removeFromRight (88).reduced (8, 0));
-        addStateButton.setBounds (top.removeFromRight (88).reduced (8, 0));
-        phase.setBounds (top.removeFromRight (170).reduced (8, 0));
-        meter.setBounds (top.removeFromRight (88).reduced (8, 0));
-        tempo.setBounds (top.removeFromRight (210).reduced (8, 0));
+        zoomOutButton.setBounds (top.removeFromLeft (32).reduced (3, 4));
+        zoomInButton.setBounds (top.removeFromLeft (32).reduced (3, 4));
+        fitGraphButton.setBounds (top.removeFromLeft (54).reduced (4, 4));
+        arrangeGraphButton.setBounds (top.removeFromLeft (86).reduced (4, 4));
+        playButton.setBounds (top.removeFromRight (68));
+        stopButton.setBounds (top.removeFromRight (68).reduced (6, 0));
+        removeStateButton.setBounds (top.removeFromRight (82).reduced (6, 0));
+        addStateButton.setBounds (top.removeFromRight (82).reduced (6, 0));
+        phase.setBounds (top.removeFromRight (138).reduced (6, 0));
+        meter.setBounds (top.removeFromRight (76).reduced (6, 0));
+        tempo.setBounds (top.removeFromRight (164).reduced (6, 0));
 
         area.removeFromTop (6);
-        const auto editorWidth = scoreEditorWidthFor (area);
         auto editorArea = area.removeFromRight (editorWidth);
         auto scoreButtons = editorArea.removeFromTop (28);
         const auto buttonWidth = scoreButtons.getWidth() / 4;
@@ -1161,7 +1190,92 @@ public:
         resetScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (6, 0));
         clearScoreButton.setBounds (scoreButtons.reduced (6, 0));
         editorArea.removeFromTop (6);
+        auto fontButtons = editorArea.removeFromTop (26);
+        scoreFontDownButton.setBounds (fontButtons.removeFromRight (44).reduced (4, 1));
+        scoreFontUpButton.setBounds (fontButtons.removeFromRight (44).reduced (4, 1));
+        editorArea.removeFromTop (4);
         scoreScript.setBounds (editorArea);
+
+        const auto patchArea = getPatchArea();
+        if (! userAdjustedGraphView && ! patchArea.isEmpty() && patchArea != lastAutoFitPatchArea)
+        {
+            lastAutoFitPatchArea = patchArea;
+            fitGraphToView();
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent& event) override
+    {
+        const auto graphArea = getGraphArea();
+        if (! graphArea.contains (event.getPosition()))
+            return;
+
+        if (event.mods.isRightButtonDown())
+        {
+            userAdjustedGraphView = true;
+            isPanningGraph = true;
+            panStart = viewportPan;
+            return;
+        }
+
+        const auto nodes = transformedStateNodeBounds (getPatchArea(), currentNodeWidth(), currentNodeHeight());
+        for (size_t i = 0; i < nodes.size(); ++i)
+        {
+            if (nodes[i].contains (event.getPosition()))
+            {
+                if (onSelectState != nullptr)
+                    onSelectState (static_cast<int> (i));
+
+                draggedStateIndex = static_cast<int> (i);
+                dragStartStateCanvas = { static_cast<float> (project.states[i].canvasX),
+                                         static_cast<float> (project.states[i].canvasY) };
+                return;
+            }
+        }
+    }
+
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (isPanningGraph && event.mods.isRightButtonDown())
+        {
+            viewportPan = panStart + event.getOffsetFromDragStart().toFloat();
+            repaint();
+            return;
+        }
+
+        if (draggedStateIndex >= 0 && draggedStateIndex < static_cast<int> (project.states.size()))
+        {
+            const auto delta = event.getOffsetFromDragStart().toFloat() / viewportZoom;
+            auto& state = project.states[static_cast<size_t> (draggedStateIndex)];
+            state.canvasX = juce::roundToInt (dragStartStateCanvas.x + delta.x);
+            state.canvasY = juce::roundToInt (dragStartStateCanvas.y + delta.y);
+            repaint();
+        }
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        isPanningGraph = false;
+        draggedStateIndex = -1;
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
+    {
+        const auto graphArea = getGraphArea();
+        if (! graphArea.contains (event.getPosition()) || std::abs (wheel.deltaY) < 0.0001f)
+            return;
+
+        const auto oldZoom = viewportZoom;
+        const auto zoomStep = wheel.deltaY > 0.0f ? 1.12f : 1.0f / 1.12f;
+        userAdjustedGraphView = true;
+        viewportZoom = juce::jlimit (0.45f, 3.0f, viewportZoom * zoomStep);
+
+        const auto patchArea = getPatchArea();
+        const auto origin = patchArea.getPosition().toFloat();
+        const auto mouse = event.position;
+        const auto graphPoint = (mouse - origin - viewportPan) / oldZoom;
+        viewportPan = mouse - origin - graphPoint * viewportZoom;
+        repaint();
     }
 
     void setSelectedStateIndex (int index)
@@ -1189,17 +1303,174 @@ private:
         return juce::jlimit (280, 430, area.getWidth() / 3);
     }
 
-    static void drawPatchGrid (juce::Graphics& g, juce::Rectangle<int> area)
+    void setScoreFontSize (float fontSize)
+    {
+        scoreFontSize = juce::jlimit (10.0f, 22.0f, fontSize);
+        setCodeEditorFontSize (scoreScript, scoreFontSize);
+    }
+
+    struct ActiveState
+    {
+        int index = -1;
+        double progress = 0.0;
+    };
+
+    juce::Rectangle<int> getGraphArea() const
+    {
+        auto area = getLocalBounds().reduced (18);
+        area.removeFromTop (42);
+        const auto editorWidth = scoreEditorWidthFor (area);
+        area.removeFromRight (editorWidth + 12);
+        return area;
+    }
+
+    juce::Rectangle<int> getPatchArea() const
+    {
+        auto area = getGraphArea();
+        area.removeFromBottom (34);
+        auto patchArea = area.reduced (14);
+        patchArea.removeFromBottom (14);
+        return patchArea;
+    }
+
+    int currentNodeWidth() const
+    {
+        return 188;
+    }
+
+    int currentNodeHeight() const
+    {
+        return 92;
+    }
+
+    std::vector<juce::Rectangle<int>> transformedStateNodeBounds (juce::Rectangle<int> patchArea,
+                                                                  int nodeWidth,
+                                                                  int nodeHeight) const
+    {
+        std::vector<juce::Rectangle<int>> nodes;
+        nodes.reserve (project.states.size());
+
+        for (const auto& state : project.states)
+        {
+            const auto x = static_cast<float> (patchArea.getX()) + viewportPan.x + static_cast<float> (state.canvasX) * viewportZoom;
+            const auto y = static_cast<float> (patchArea.getY()) + viewportPan.y + static_cast<float> (state.canvasY) * viewportZoom;
+            nodes.push_back ({ juce::roundToInt (x),
+                               juce::roundToInt (y),
+                               juce::roundToInt (static_cast<float> (nodeWidth) * viewportZoom),
+                               juce::roundToInt (static_cast<float> (nodeHeight) * viewportZoom) });
+        }
+
+        return nodes;
+    }
+
+    juce::Rectangle<float> graphContentBounds() const
+    {
+        if (project.states.empty())
+            return {};
+
+        auto bounds = juce::Rectangle<float> (static_cast<float> (project.states.front().canvasX),
+                                             static_cast<float> (project.states.front().canvasY),
+                                             static_cast<float> (currentNodeWidth()),
+                                             static_cast<float> (currentNodeHeight()));
+
+        for (const auto& state : project.states)
+        {
+            bounds = bounds.getUnion ({ static_cast<float> (state.canvasX),
+                                        static_cast<float> (state.canvasY),
+                                        static_cast<float> (currentNodeWidth()),
+                                        static_cast<float> (currentNodeHeight()) });
+        }
+
+        return bounds;
+    }
+
+    void fitGraphToView()
+    {
+        const auto patchArea = getPatchArea().toFloat();
+        const auto content = graphContentBounds();
+        if (patchArea.isEmpty() || content.isEmpty())
+            return;
+
+        constexpr auto initialZoomMultiplier = 1.2f;
+        const auto paddedArea = patchArea.reduced (18.0f);
+        const auto scaleX = paddedArea.getWidth() / juce::jmax (1.0f, content.getWidth());
+        const auto scaleY = paddedArea.getHeight() / juce::jmax (1.0f, content.getHeight());
+        viewportZoom = juce::jlimit (0.45f, 3.0f, juce::jmin (scaleX, scaleY) * initialZoomMultiplier);
+        viewportPan = { (patchArea.getWidth() - content.getWidth() * viewportZoom) * 0.5f - content.getX() * viewportZoom,
+                        (patchArea.getHeight() - content.getHeight() * viewportZoom) * 0.5f - content.getY() * viewportZoom };
+        repaint();
+    }
+
+    void zoomGraphFromCentre (float factor)
+    {
+        const auto patchArea = getPatchArea();
+        if (patchArea.isEmpty())
+            return;
+
+        const auto oldZoom = viewportZoom;
+        viewportZoom = juce::jlimit (0.45f, 3.0f, viewportZoom * factor);
+        const auto origin = patchArea.getPosition().toFloat();
+        const auto centre = patchArea.getCentre().toFloat();
+        const auto graphPoint = (centre - origin - viewportPan) / oldZoom;
+        viewportPan = centre - origin - graphPoint * viewportZoom;
+        repaint();
+    }
+
+    ActiveState activeStateForBeat (double beat) const
+    {
+        if (! (isCountingIn || isPlaying))
+            return {};
+
+        auto stateStart = 0.0;
+        const auto order = playableArrangementOrder (project);
+        for (size_t i = 0; i < order.size(); ++i)
+        {
+            const auto stateIndex = order[i];
+            if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+                continue;
+
+            const auto duration = juce::jmax (0.0001, project.states[static_cast<size_t> (stateIndex)].durationBeats);
+            const auto isLast = i + 1 == order.size();
+            if (beat >= stateStart && (beat < stateStart + duration || isLast))
+                return { stateIndex, juce::jlimit (0.0, 1.0, (beat - stateStart) / duration) };
+
+            stateStart += duration;
+        }
+
+        return {};
+    }
+
+    static void drawPatchGrid (juce::Graphics& g,
+                               juce::Rectangle<int> area,
+                               float zoom,
+                               juce::Point<float> pan)
     {
         g.setColour (juce::Colour (0xff202624));
         g.fillRect (area);
 
         g.setColour (juce::Colour (0xff2a312f));
-        for (auto x = area.getX(); x < area.getRight(); x += 24)
-            g.drawVerticalLine (x, static_cast<float> (area.getY()), static_cast<float> (area.getBottom()));
+        const auto spacing = juce::jlimit (8.0f, 72.0f, 24.0f * zoom);
+        auto firstX = static_cast<float> (area.getX()) + std::fmod (pan.x, spacing);
+        if (firstX > static_cast<float> (area.getX()))
+            firstX -= spacing;
 
-        for (auto y = area.getY(); y < area.getBottom(); y += 24)
-            g.drawHorizontalLine (y, static_cast<float> (area.getX()), static_cast<float> (area.getRight()));
+        auto firstY = static_cast<float> (area.getY()) + std::fmod (pan.y, spacing);
+        if (firstY > static_cast<float> (area.getY()))
+            firstY -= spacing;
+
+        for (auto x = firstX; x < static_cast<float> (area.getRight()); x += spacing)
+            g.drawLine (x,
+                        static_cast<float> (area.getY()),
+                        x,
+                        static_cast<float> (area.getBottom()),
+                        1.0f);
+
+        for (auto y = firstY; y < static_cast<float> (area.getBottom()); y += spacing)
+            g.drawLine (static_cast<float> (area.getX()),
+                        y,
+                        static_cast<float> (area.getRight()),
+                        y,
+                        1.0f);
 
         g.setColour (juce::Colour (0xff3a4642));
         g.drawRect (area);
@@ -1234,19 +1505,41 @@ private:
         }
     }
 
-    static void drawStateNode (juce::Graphics& g, const StateModel& state, juce::Rectangle<int> node, int index, bool selected)
+    static void drawStateNode (juce::Graphics& g,
+                               const StateModel& state,
+                               juce::Rectangle<int> node,
+                               int index,
+                               bool selected,
+                               bool active,
+                               double progress)
     {
         const auto language = state.tracks.empty() ? Language::chuck : state.tracks.front().language;
         const auto base = languageColour (language);
 
         g.setColour (juce::Colour (0xff121615));
         g.fillRect (node);
+        if (active)
+        {
+            g.setColour (base.withAlpha (0.18f));
+            g.fillRect (node.reduced (3));
+            g.setColour (juce::Colour (0xfffff0a8).withAlpha (0.35f));
+            g.drawRect (node.expanded (7), 2);
+        }
+
         g.setColour (base.withAlpha (0.92f));
         g.drawRect (node, 2);
         if (selected)
         {
             g.setColour (juce::Colour (0xfffff0a8));
             g.drawRect (node.expanded (3), 2);
+        }
+
+        if (active)
+        {
+            auto progressBar = node.reduced (6).removeFromBottom (4);
+            progressBar.setWidth (juce::roundToInt (progressBar.getWidth() * juce::jlimit (0.0, 1.0, progress)));
+            g.setColour (juce::Colour (0xfffff0a8));
+            g.fillRect (progressBar);
         }
 
         const auto inlet = juce::Rectangle<int> (node.getX() - 4, node.getCentreY() - 4, 8, 8);
@@ -1279,6 +1572,10 @@ private:
 
     ProjectModel& project;
     SectionHeader title;
+    juce::TextButton zoomOutButton;
+    juce::TextButton zoomInButton;
+    juce::TextButton fitGraphButton;
+    juce::TextButton arrangeGraphButton;
     juce::TextButton playButton;
     juce::TextButton stopButton;
     juce::TextButton addStateButton;
@@ -1287,14 +1584,25 @@ private:
     juce::TextButton syncScoreButton;
     juce::TextButton resetScoreButton;
     juce::TextButton clearScoreButton;
+    juce::TextButton scoreFontDownButton;
+    juce::TextButton scoreFontUpButton;
     juce::Slider tempo;
     juce::ComboBox meter;
     juce::Slider phase;
     juce::TextEditor scoreScript;
+    float scoreFontSize = 13.0f;
     bool isCountingIn = false;
     bool isPlaying = false;
     int selectedStateIndex = 0;
     double currentBeat = 0.0;
+    float viewportZoom = 1.0f;
+    juce::Point<float> viewportPan;
+    juce::Point<float> panStart;
+    juce::Point<float> dragStartStateCanvas;
+    int draggedStateIndex = -1;
+    bool isPanningGraph = false;
+    bool userAdjustedGraphView = false;
+    juce::Rectangle<int> lastAutoFitPatchArea;
 };
 
 class TrackEditorComponent final : public juce::Component
@@ -1377,7 +1685,15 @@ public:
         };
         addAndMakeVisible (clearButton);
 
-        configureCodeEditor (code, 14.0f);
+        fontDownButton.setButtonText ("A-");
+        fontDownButton.onClick = [this] { setTrackCodeFontSize (codeFontSize - 1.0f); };
+        addAndMakeVisible (fontDownButton);
+
+        fontUpButton.setButtonText ("A+");
+        fontUpButton.onClick = [this] { setTrackCodeFontSize (codeFontSize + 1.0f); };
+        addAndMakeVisible (fontUpButton);
+
+        configureCodeEditor (code, codeFontSize);
         code.setText (track.code, false);
         code.onTextChange = [this] { track.code = code.getText(); };
         addAndMakeVisible (code);
@@ -1399,15 +1715,21 @@ public:
     void resized() override
     {
         auto area = getLocalBounds().reduced (10);
-        auto controls = area.removeFromTop (34);
-        name.setBounds (controls.removeFromLeft (160));
-        language.setBounds (controls.removeFromLeft (145).reduced (8, 0));
-        sync.setBounds (controls.removeFromLeft (74).reduced (4, 0));
-        tempo.setBounds (controls.removeFromLeft (170).reduced (8, 0));
-        timeSig.setBounds (controls.removeFromLeft (82).reduced (8, 0));
-        phase.setBounds (controls.removeFromLeft (150).reduced (8, 0));
-        templateButton.setBounds (controls.removeFromLeft (92).reduced (8, 0));
-        clearButton.setBounds (controls.removeFromLeft (68).reduced (4, 0));
+        auto mainControls = area.removeFromTop (34);
+        name.setBounds (mainControls.removeFromLeft (juce::jmin (230, juce::jmax (130, mainControls.getWidth() / 5))));
+        language.setBounds (mainControls.removeFromLeft (150).reduced (8, 0));
+        sync.setBounds (mainControls.removeFromLeft (74).reduced (4, 0));
+        fontUpButton.setBounds (mainControls.removeFromRight (44).reduced (4, 0));
+        fontDownButton.setBounds (mainControls.removeFromRight (44).reduced (4, 0));
+        clearButton.setBounds (mainControls.removeFromRight (68).reduced (4, 0));
+        templateButton.setBounds (mainControls.removeFromRight (100).reduced (8, 0));
+
+        area.removeFromTop (6);
+        auto timingControls = area.removeFromTop (30);
+        tempo.setBounds (timingControls.removeFromLeft (juce::jmin (220, timingControls.getWidth() / 3)).reduced (0, 2));
+        timeSig.setBounds (timingControls.removeFromLeft (94).reduced (8, 2));
+        phase.setBounds (timingControls.removeFromLeft (juce::jmin (220, timingControls.getWidth())).reduced (8, 2));
+
         code.setBounds (area.withTrimmedTop (8));
     }
 
@@ -1428,6 +1750,12 @@ private:
         phase.setEnabled (independent);
     }
 
+    void setTrackCodeFontSize (float fontSize)
+    {
+        codeFontSize = juce::jlimit (10.0f, 24.0f, fontSize);
+        setCodeEditorFontSize (code, codeFontSize);
+    }
+
     TrackModel& track;
     juce::TextEditor name;
     juce::ComboBox language;
@@ -1437,7 +1765,10 @@ private:
     juce::Slider phase;
     juce::TextButton templateButton;
     juce::TextButton clearButton;
+    juce::TextButton fontDownButton;
+    juce::TextButton fontUpButton;
     juce::TextEditor code;
+    float codeFontSize = 14.0f;
 };
 
 class StateEditorComponent final : public juce::Component
@@ -1500,7 +1831,7 @@ public:
         addTrackButton.setBounds (top.removeFromRight (92).reduced (6, 0));
         area.removeFromTop (10);
 
-        const auto trackHeight = juce::jmax (124, area.getHeight() / juce::jmax (1, static_cast<int> (trackEditors.size())));
+        const auto trackHeight = juce::jmax (154, area.getHeight() / juce::jmax (1, static_cast<int> (trackEditors.size())));
         for (auto& editor : trackEditors)
             editor->setBounds (area.removeFromTop (trackHeight).reduced (0, 5));
     }
@@ -1536,9 +1867,21 @@ public:
         : project (projectToUse),
           trackLanes (projectToUse)
     {
+        addAndMakeVisible (zoomOutButton);
+        zoomOutButton.setButtonText ("-");
+        zoomOutButton.onClick = [this] { setLaneZoom (laneZoom / 1.25); };
+
+        addAndMakeVisible (zoomInButton);
+        zoomInButton.setButtonText ("+");
+        zoomInButton.onClick = [this] { setLaneZoom (laneZoom * 1.25); };
+
+        addAndMakeVisible (fitButton);
+        fitButton.setButtonText ("Fit");
+        fitButton.onClick = [this] { setLaneZoom (1.0); };
+
         addAndMakeVisible (trackViewport);
         trackViewport.setViewedComponent (&trackLanes, false);
-        trackViewport.setScrollBarsShown (true, false);
+        trackViewport.setScrollBarsShown (true, true);
     }
 
     void setTransport (bool countingInToUse, bool playingToUse, double countInBeatToUse, double beatToUse)
@@ -1567,9 +1910,13 @@ public:
     {
         g.fillAll (juce::Colour (0xff101211));
         auto area = getLocalBounds().reduced (18);
+        auto header = area.removeFromTop (30);
         g.setColour (juce::Colour (0xffdce3e1));
         g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
-        g.drawText (countingIn ? "Arrangement: count-in" : "Arrangement", area.removeFromTop (30), juce::Justification::centredLeft, true);
+        g.drawText (countingIn ? "Arrangement: count-in" : "Arrangement", header, juce::Justification::centredLeft, true);
+        g.setColour (juce::Colour (0xff8fa19a));
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (juce::String (laneZoom, 2) + "x", header.removeFromRight (64), juce::Justification::centredRight, true);
 
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
         auto timeline = area.removeFromTop (juce::jmax (80, area.getHeight() / 4));
@@ -1725,7 +2072,10 @@ private:
     void updateTrackLaneBounds()
     {
         auto area = getLocalBounds().reduced (18);
-        area.removeFromTop (30);
+        auto header = area.removeFromTop (30);
+        fitButton.setBounds (header.removeFromRight (54).reduced (4, 2));
+        zoomInButton.setBounds (header.removeFromRight (34).reduced (4, 2));
+        zoomOutButton.setBounds (header.removeFromRight (34).reduced (4, 2));
         area.removeFromTop (juce::jmax (80, area.getHeight() / 4));
         area.removeFromTop (14);
 
@@ -1734,7 +2084,16 @@ private:
         const auto laneHeight = 42;
         const auto contentHeight = juce::jmax (area.getHeight(),
                                                TrackLanesComponent::laneCountFor (project) * laneHeight);
-        trackLanes.setBounds (0, 0, juce::jmax (1, area.getWidth() - 14), contentHeight);
+        const auto contentWidth = juce::jmax (1, juce::roundToInt (static_cast<double> (juce::jmax (1, area.getWidth() - 14)) * laneZoom));
+        trackLanes.setBounds (0, 0, contentWidth, contentHeight);
+    }
+
+    void setLaneZoom (double zoom)
+    {
+        laneZoom = juce::jlimit (1.0, 6.0, zoom);
+        updateTrackLaneBounds();
+        trackLanes.repaint();
+        repaint();
     }
 
     static void drawPlayhead (juce::Graphics& g, juce::Rectangle<int> timeline, double normalised)
@@ -1750,12 +2109,16 @@ private:
     }
 
     ProjectModel& project;
+    juce::TextButton zoomOutButton;
+    juce::TextButton zoomInButton;
+    juce::TextButton fitButton;
     juce::Viewport trackViewport;
     TrackLanesComponent trackLanes;
     bool countingIn = false;
     bool playing = false;
     double countInBeat = 0.0;
     double currentBeat = 0.0;
+    double laneZoom = 1.0;
 };
 
 class MixerComponent final : public juce::Component
@@ -1766,6 +2129,9 @@ public:
     explicit MixerComponent (ProjectModel& projectToUse)
         : project (projectToUse)
     {
+        addAndMakeVisible (channelViewport);
+        channelViewport.setViewedComponent (&channelContent, false);
+        channelViewport.setScrollBarsShown (false, true);
         rebuild();
     }
 
@@ -1782,10 +2148,14 @@ public:
         auto title = area.removeFromTop (28);
         titleBounds = title;
         area.removeFromTop (12);
+        channelViewport.setBounds (area);
 
-        const auto channelWidth = juce::jlimit (86, 136, area.getWidth() / juce::jmax (1, static_cast<int> (channels.size())));
+        const auto channelWidth = 112;
+        const auto contentWidth = juce::jmax (area.getWidth(), channelWidth * static_cast<int> (channels.size()));
+        channelContent.setBounds (0, 0, contentWidth, area.getHeight());
+        auto channelArea = channelContent.getLocalBounds();
         for (auto& channel : channels)
-            channel->setBounds (area.removeFromLeft (channelWidth).reduced (5, 0));
+            channel->setBounds (channelArea.removeFromLeft (channelWidth).reduced (5, 0));
     }
 
     void paint (juce::Graphics& g) override
@@ -1794,14 +2164,18 @@ public:
         g.setColour (juce::Colour (0xffdce3e1));
         g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
         g.drawText ("Mixer", titleBounds, juce::Justification::centredLeft, true);
+        g.setColour (juce::Colour (0xff8fa19a));
+        g.setFont (juce::FontOptions (12.0f));
+        g.drawText (juce::String (channels.size()) + " tracks", titleBounds, juce::Justification::centredRight, true);
     }
 
 private:
     class Channel final : public juce::Component
     {
     public:
-        Channel (TrackModel& trackToUse, std::function<void()> controlChangeCallback)
+        Channel (TrackModel& trackToUse, juce::String stateNameToUse, std::function<void()> controlChangeCallback)
             : track (trackToUse),
+              stateName (std::move (stateNameToUse)),
               onControlChange (std::move (controlChangeCallback))
         {
             fader.setSliderStyle (juce::Slider::LinearVertical);
@@ -1811,6 +2185,7 @@ private:
             fader.onValueChange = [this]
             {
                 track.level = static_cast<float> (fader.getValue());
+                repaint();
                 notifyControlChange();
             };
             addAndMakeVisible (fader);
@@ -1820,6 +2195,7 @@ private:
             mute.onClick = [this]
             {
                 track.muted = mute.getToggleState();
+                repaint();
                 notifyControlChange();
             };
             addAndMakeVisible (mute);
@@ -1829,6 +2205,7 @@ private:
             solo.onClick = [this]
             {
                 track.soloed = solo.getToggleState();
+                repaint();
                 notifyControlChange();
             };
             addAndMakeVisible (solo);
@@ -1838,17 +2215,40 @@ private:
         {
             g.setColour (juce::Colour (0xff1b201f));
             g.fillRect (getLocalBounds());
-            g.setColour (languageColour (track.language));
+            const auto colour = languageColour (track.language);
+            g.setColour (colour);
             g.fillRect (getLocalBounds().removeFromTop (4));
+
+            auto meter = getLocalBounds().reduced (10);
+            meter.removeFromTop (76);
+            meter.removeFromBottom (42);
+            auto levelFill = meter.withTop (meter.getBottom()
+                                            - juce::roundToInt (static_cast<float> (meter.getHeight())
+                                                                * juce::jlimit (0.0f, 1.0f, track.level)));
+            g.setColour (colour.withAlpha (track.muted ? 0.14f : 0.28f));
+            g.fillRect (meter);
+            g.setColour (colour.withAlpha (track.muted ? 0.25f : 0.78f));
+            g.fillRect (levelFill);
+
             g.setColour (juce::Colour (0xffdce3e1));
             g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-            g.drawFittedText (track.name, getLocalBounds().reduced (7).removeFromTop (38), juce::Justification::centred, 2);
+            auto label = getLocalBounds().reduced (7).removeFromTop (62);
+            g.drawFittedText (track.name, label.removeFromTop (34), juce::Justification::centred, 2);
+            g.setColour (juce::Colour (0xff9fb0aa));
+            g.setFont (juce::FontOptions (10.5f));
+            g.drawFittedText (stateName + " / " + languageName (track.language), label, juce::Justification::centred, 2);
+
+            if (track.muted || track.soloed)
+            {
+                g.setColour (track.soloed ? juce::Colour (0xfffff0a8) : juce::Colour (0xffd58b73));
+                g.drawRect (getLocalBounds().reduced (2), 2);
+            }
         }
 
         void resized() override
         {
             auto area = getLocalBounds().reduced (7);
-            area.removeFromTop (44);
+            area.removeFromTop (68);
             auto buttons = area.removeFromBottom (30);
             mute.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (2));
             solo.setBounds (buttons.reduced (2));
@@ -1863,6 +2263,7 @@ private:
         }
 
         TrackModel& track;
+        juce::String stateName;
         std::function<void()> onControlChange;
         juce::Slider fader;
         juce::TextButton mute;
@@ -1872,17 +2273,18 @@ private:
     void rebuild()
     {
         channels.clear();
+        channelContent.removeAllChildren();
 
         for (auto& state : project.states)
         {
             for (auto& track : state.tracks)
             {
-                auto channel = std::make_unique<Channel> (track, [this]
+                auto channel = std::make_unique<Channel> (track, state.name, [this]
                 {
                     if (onControlChange != nullptr)
                         onControlChange();
                 });
-                addAndMakeVisible (*channel);
+                channelContent.addAndMakeVisible (*channel);
                 channels.push_back (std::move (channel));
             }
         }
@@ -1890,6 +2292,8 @@ private:
 
     ProjectModel& project;
     juce::Rectangle<int> titleBounds;
+    juce::Viewport channelViewport;
+    juce::Component channelContent;
     std::vector<std::unique_ptr<Channel>> channels;
 };
 

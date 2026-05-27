@@ -542,21 +542,37 @@ juce::String demoRTcmixBassCode()
            "WAVETABLE(0, 3600, gain * 0.30 * stategain * trackgain * 32767.0, fifth, 0.62, wave)\n";
 }
 
+juce::String demoCsoundBellCode()
+{
+    return "giWeldSine ftgen 1, 0, 4096, 10, 1\n"
+           "\n"
+           "instr 1\n"
+           "    kfreq chnget \"hostFreq\"\n"
+           "    kgain chnget \"hostGain\"\n"
+           "    kstate chnget \"hostStateGain\"\n"
+           "    ktrack chnget \"hostTrackGain\"\n"
+           "    kblend chnget \"hostBlend\"\n"
+           "    a1 oscili kgain * 0.20 * kstate * ktrack, kfreq * 2.25, giWeldSine\n"
+           "    a2 oscili kgain * 0.12 * kstate * ktrack, kfreq * (2.5 + (kblend * 0.04)), giWeldSine\n"
+           "    outs a1, a2\n"
+           "endin\n";
+}
+
 juce::String defaultChucKScoreScript()
 {
     return "score.clear();\n"
            "tempo(120);\n"
            "meter(4, 4);\n"
-           "state.add(\"Motif\", 16, 0);\n"
+           "state.add(\"Motif\", 32, 0);\n"
            "track.add(1, \"ChucK pulse canon\", \"chuck\");\n"
            "track.gain(1, 1, 0.46);\n"
            "track.add(1, \"Upper response\", \"chuck\");\n"
            "track.gain(1, 2, 0.42);\n"
-           "track.add(1, \"Low clock\", \"chuck\");\n"
-           "track.gain(1, 3, 0.38);\n"
+           "track.add(1, \"Csound bright edge\", \"csound\");\n"
+           "track.gain(1, 3, 0.44);\n"
            "track.add(1, \"Inner fifth\", \"chuck\");\n"
            "track.gain(1, 4, 0.40);\n"
-           "state.add(\"Glass branch\", 12, 0);\n"
+           "state.add(\"Glass branch\", 24, 0);\n"
            "track.add(2, \"SC glass harmonics\", \"supercollider\");\n"
            "track.gain(2, 1, 0.46);\n"
            "track.add(2, \"ChucK halo\", \"chuck\");\n"
@@ -565,7 +581,7 @@ juce::String defaultChucKScoreScript()
            "track.gain(2, 3, 0.38);\n"
            "track.add(2, \"ChucK high pin\", \"chuck\");\n"
            "track.gain(2, 4, 0.34);\n"
-           "state.add(\"Low branch\", 20, 0);\n"
+           "state.add(\"Low branch\", 40, 0);\n"
            "track.add(3, \"RTcmix low pedal\", \"rtcmix\");\n"
            "track.gain(3, 1, 0.44);\n"
            "track.add(3, \"ChucK pedal octave\", \"chuck\");\n"
@@ -574,12 +590,12 @@ juce::String defaultChucKScoreScript()
            "track.gain(3, 3, 0.38);\n"
            "track.add(3, \"ChucK low shimmer\", \"chuck\");\n"
            "track.gain(3, 4, 0.36);\n"
-           "state.add(\"Coda\", 10, 0);\n"
+           "state.add(\"Coda\", 20, 0);\n"
            "track.add(4, \"ChucK answer\", \"chuck\");\n"
            "track.gain(4, 1, 0.42);\n"
            "track.add(4, \"ChucK coda glow\", \"chuck\");\n"
            "track.gain(4, 2, 0.40);\n"
-           "track.add(4, \"ChucK final fifth\", \"chuck\");\n"
+           "track.add(4, \"Csound closing bell\", \"csound\");\n"
            "track.gain(4, 3, 0.38);\n"
            "track.add(4, \"ChucK floor\", \"chuck\");\n"
            "track.gain(4, 4, 0.34);\n"
@@ -695,13 +711,7 @@ juce::String defaultCodeForLanguage (Language language)
             return demoRTcmixBassCode();
 
         case Language::csound:
-            return "instr 1\n"
-                   "    kfreq chnget \"hostFreq\"\n"
-                   "    kgain chnget \"hostGain\"\n"
-                   "    ktrack chnget \"hostTrackGain\"\n"
-                   "    a1 oscili kgain * ktrack, kfreq\n"
-                   "    outs a1, a1\n"
-                   "endin\n";
+            return demoCsoundBellCode();
 
         case Language::faust:
             return "import(\"stdfaust.lib\");\n"
@@ -797,6 +807,14 @@ TrackModel makeTrack (juce::String name, Language language)
     return track;
 }
 
+TrackModel makeDemoTrack (juce::String name, Language language, float level, juce::String code)
+{
+    auto track = makeTrack (std::move (name), language);
+    track.level = level;
+    track.code = std::move (code);
+    return track;
+}
+
 StateModel makeState (int index)
 {
     StateModel state;
@@ -817,91 +835,47 @@ ProjectModel makeInitialProject()
 
     StateModel chuck;
     chuck.name = "Motif";
-    chuck.durationBeats = 16.0;
+    chuck.durationBeats = 32.0;
     chuck.tailBeats = 0.0;
     chuck.canvasX = 70;
     chuck.canvasY = 160;
-    chuck.tracks.push_back ({ "ChucK pulse canon",
-                              Language::chuck,
-                              true,
-                              120.0,
-                              4,
-                              4,
-                              0.0,
-                              0.46f,
-                              false,
-                              false,
-                              demoChucKMotifCode(),
-                              {} });
-    chuck.tracks.push_back ({ "Upper response", Language::chuck, true, 120.0, 4, 4, 0.0, 0.42f, false, false, demoChucKLayerCode (3.0, 0.046, 0.16, 1), {} });
-    chuck.tracks.push_back ({ "Low clock", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (0.5, 0.052, 0.10, 4), {} });
-    chuck.tracks.push_back ({ "Inner fifth", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (1.5, 0.044, 0.12, 2), {} });
+    chuck.tracks.push_back (makeDemoTrack ("ChucK pulse canon", Language::chuck, 0.46f, demoChucKMotifCode()));
+    chuck.tracks.push_back (makeDemoTrack ("Upper response", Language::chuck, 0.42f, demoChucKLayerCode (3.0, 0.046, 0.16, 1)));
+    chuck.tracks.push_back (makeDemoTrack ("Csound bright edge", Language::csound, 0.44f, demoCsoundBellCode()));
+    chuck.tracks.push_back (makeDemoTrack ("Inner fifth", Language::chuck, 0.40f, demoChucKLayerCode (1.5, 0.044, 0.12, 2)));
 
     StateModel sc;
     sc.name = "Glass branch";
-    sc.durationBeats = 12.0;
+    sc.durationBeats = 24.0;
     sc.tailBeats = 0.0;
     sc.canvasX = 330;
     sc.canvasY = 60;
-    sc.tracks.push_back ({ "SC glass harmonics",
-                           Language::supercollider,
-                           true,
-                           120.0,
-                           4,
-                           4,
-                           0.0,
-                           0.46f,
-                           false,
-                           false,
-                           demoSuperColliderHarmonicCode(),
-                           {} });
-    sc.tracks.push_back ({ "ChucK halo", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (2.0, 0.044, 0.18, 0), {} });
-    sc.tracks.push_back ({ "ChucK slow answer", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (1.0, 0.046, 0.10, 3), {} });
-    sc.tracks.push_back ({ "ChucK high pin", Language::chuck, true, 120.0, 4, 4, 0.0, 0.34f, false, false, demoChucKLayerCode (4.0, 0.036, 0.08, 5), {} });
+    sc.tracks.push_back (makeDemoTrack ("SC glass harmonics", Language::supercollider, 0.46f, demoSuperColliderHarmonicCode()));
+    sc.tracks.push_back (makeDemoTrack ("ChucK halo", Language::chuck, 0.40f, demoChucKLayerCode (2.0, 0.044, 0.18, 0)));
+    sc.tracks.push_back (makeDemoTrack ("ChucK slow answer", Language::chuck, 0.38f, demoChucKLayerCode (1.0, 0.046, 0.10, 3)));
+    sc.tracks.push_back (makeDemoTrack ("ChucK high pin", Language::chuck, 0.34f, demoChucKLayerCode (4.0, 0.036, 0.08, 5)));
 
     StateModel rtcmix;
     rtcmix.name = "Low branch";
-    rtcmix.durationBeats = 20.0;
+    rtcmix.durationBeats = 40.0;
     rtcmix.tailBeats = 0.0;
     rtcmix.canvasX = 330;
     rtcmix.canvasY = 230;
-    rtcmix.tracks.push_back ({ "RTcmix low pedal",
-                               Language::rtcmix,
-                               true,
-                               120.0,
-                               4,
-                               4,
-                               0.0,
-                               0.44f,
-                               false,
-                               false,
-                               demoRTcmixBassCode(),
-                               {} });
-    rtcmix.tracks.push_back ({ "ChucK pedal octave", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (0.5, 0.050, 0.09, 0), {} });
-    rtcmix.tracks.push_back ({ "ChucK pulse shadow", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (1.0, 0.042, 0.12, 2), {} });
-    rtcmix.tracks.push_back ({ "ChucK low shimmer", Language::chuck, true, 120.0, 4, 4, 0.0, 0.36f, false, false, demoChucKLayerCode (1.5, 0.040, 0.14, 6), {} });
+    rtcmix.tracks.push_back (makeDemoTrack ("RTcmix low pedal", Language::rtcmix, 0.44f, demoRTcmixBassCode()));
+    rtcmix.tracks.push_back (makeDemoTrack ("ChucK pedal octave", Language::chuck, 0.40f, demoChucKLayerCode (0.5, 0.050, 0.09, 0)));
+    rtcmix.tracks.push_back (makeDemoTrack ("ChucK pulse shadow", Language::chuck, 0.38f, demoChucKLayerCode (1.0, 0.042, 0.12, 2)));
+    rtcmix.tracks.push_back (makeDemoTrack ("ChucK low shimmer", Language::chuck, 0.36f, demoChucKLayerCode (1.5, 0.040, 0.14, 6)));
 
     StateModel coda;
     coda.name = "Coda";
-    coda.durationBeats = 10.0;
+    coda.durationBeats = 20.0;
     coda.tailBeats = 0.0;
     coda.canvasX = 590;
     coda.canvasY = 160;
-    coda.tracks.push_back ({ "ChucK answer",
-                             Language::chuck,
-                             true,
-                             120.0,
-                             4,
-                             4,
-                             0.0,
-                             0.42f,
-                             false,
-                             false,
-                             demoChucKCodaCode(),
-                             {} });
-    coda.tracks.push_back ({ "ChucK coda glow", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (2.0, 0.042, 0.12, 1), {} });
-    coda.tracks.push_back ({ "ChucK final fifth", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (1.5, 0.040, 0.10, 3), {} });
-    coda.tracks.push_back ({ "ChucK floor", Language::chuck, true, 120.0, 4, 4, 0.0, 0.34f, false, false, demoChucKLayerCode (0.5, 0.044, 0.08, 5), {} });
+    coda.tracks.push_back (makeDemoTrack ("ChucK answer", Language::chuck, 0.42f, demoChucKCodaCode()));
+    coda.tracks.push_back (makeDemoTrack ("ChucK coda glow", Language::chuck, 0.40f, demoChucKLayerCode (2.0, 0.042, 0.12, 1)));
+    coda.tracks.push_back (makeDemoTrack ("Csound closing bell", Language::csound, 0.38f, demoCsoundBellCode()));
+    coda.tracks.push_back (makeDemoTrack ("ChucK floor", Language::chuck, 0.34f, demoChucKLayerCode (0.5, 0.044, 0.08, 5)));
 
     project.states.push_back (std::move (chuck));
     project.states.push_back (std::move (sc));

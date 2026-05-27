@@ -139,7 +139,7 @@ build/WeldChucK_artefacts/Release/WeldChucK --quick-performance-demo
 build/WeldChucK_artefacts/Release/WeldChucK --performance-demo
 ```
 
-The quick demo compresses the ChucK -> SuperCollider -> RTcmix sequence into a short check. The full demo uses the 30 second ChucK state, 20 second SuperCollider state, and 25 second RTcmix state, with outgoing tails left running across transitions.
+The quick demo compresses the ChucK -> SuperCollider -> RTcmix sequence into a short check. The full demo uses the longer ChucK, SuperCollider, RTcmix, and coda states, with outgoing tails left running across transitions. The GUI demo starts from a branching state graph: State 1 has weighted 70/30 outgoing paths, and State 2 has weighted 50/50 outgoing paths.
 
 Run the headless engine self-test with:
 

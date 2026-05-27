@@ -336,8 +336,14 @@ juce::String defaultChucKScoreScript()
            "state.add(\"State 3\", 20, 4);\n"
            "track.add(3, \"RTcmix bass\", \"rtcmix\");\n"
            "track.gain(3, 1, 0.65);\n"
-           "state.connect(1, 2, 1.0);\n"
-           "state.connect(2, 3, 1.0);\n"
+           "state.add(\"State 4\", 10, 4);\n"
+           "track.add(4, \"ChucK coda\", \"chuck\");\n"
+           "track.gain(4, 1, 0.68);\n"
+           "state.connect(1, 2, 70);\n"
+           "state.connect(1, 3, 30);\n"
+           "state.connect(2, 3, 50);\n"
+           "state.connect(2, 4, 50);\n"
+           "state.connect(3, 4, 1.0);\n"
            "play();\n";
 }
 
@@ -558,7 +564,7 @@ ProjectModel makeInitialProject()
 {
     ProjectModel project;
     project.chuckScoreScript = defaultChucKScoreScript();
-    project.states.reserve (3);
+    project.states.reserve (4);
 
     StateModel chuck;
     chuck.name = "State 1";
@@ -635,11 +641,39 @@ ProjectModel makeInitialProject()
                                "WAVETABLE(0, 3600, gain * stategain * 32767.0, basefreq, pan, wave)\n",
                                {} });
 
+    StateModel coda;
+    coda.name = "State 4";
+    coda.durationBeats = 10.0;
+    coda.tailBeats = 4.0;
+    coda.canvasX = 850;
+    coda.canvasY = 88;
+    coda.tracks.push_back ({ "ChucK coda",
+                             Language::chuck,
+                             true,
+                             120.0,
+                             4,
+                             4,
+                             0.0,
+                             0.68f,
+                             false,
+                             false,
+                             "SinOsc s => Gain g => dac;\n"
+                             "while (true) {\n"
+                             "    Math.max(40.0, hostFreq * 2.5) => s.freq;\n"
+                             "    Math.max(0.0, Math.min(hostGain, 0.06)) * hostStateGain * hostTrackGain => g.gain;\n"
+                             "    1::samp => now;\n"
+                             "}\n",
+                             {} });
+
     project.states.push_back (std::move (chuck));
     project.states.push_back (std::move (sc));
     project.states.push_back (std::move (rtcmix));
-    project.states[0].transitions.push_back ({ 1, 1.0 });
-    project.states[1].transitions.push_back ({ 2, 1.0 });
+    project.states.push_back (std::move (coda));
+    project.states[0].transitions.push_back ({ 1, 70.0 });
+    project.states[0].transitions.push_back ({ 2, 30.0 });
+    project.states[1].transitions.push_back ({ 2, 50.0 });
+    project.states[1].transitions.push_back ({ 3, 50.0 });
+    project.states[2].transitions.push_back ({ 3, 1.0 });
     project.arrangementOrder = defaultArrangementOrder (project);
     return project;
 }

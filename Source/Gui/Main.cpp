@@ -300,8 +300,11 @@ juce::String defaultCodeForLanguage (Language language)
     switch (language)
     {
         case Language::supercollider:
-            return "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1|\n"
-                   "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain * hostTrackGain)\n"
+            return "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,\n"
+                   "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
+                   "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
+                   "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
+                   "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain * trackGain)\n"
                    "}\n";
 
         case Language::rtcmix:
@@ -408,8 +411,11 @@ ProjectModel makeInitialProject()
                            0.72f,
                            false,
                            false,
-                           "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1|\n"
-                           "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain)\n"
+                           "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,\n"
+                           "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
+                           "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
+                           "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
+                           "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain * trackGain)\n"
                            "}\n",
                            {} });
 
@@ -1418,6 +1424,31 @@ public:
     }
 
 private:
+    static bool sequenceHasFallbackCandidate (const std::vector<EmbeddedPerformanceEngine::State>& sequence) noexcept
+    {
+        for (const auto& state : sequence)
+            for (const auto& track : state.tracks)
+                if (track.language != Language::chuck)
+                    return true;
+
+        return false;
+    }
+
+    static std::vector<EmbeddedPerformanceEngine::State>
+    makeChucKFallbackSequence (std::vector<EmbeddedPerformanceEngine::State> sequence)
+    {
+        for (auto& state : sequence)
+            for (auto& track : state.tracks)
+                if (track.language != Language::chuck)
+                {
+                    track.language = Language::chuck;
+                    track.programBody = defaultCodeForLanguage (Language::chuck);
+                    track.parameterBindings = EmbeddedChucKEngine::getDefaultParameterBindings();
+                }
+
+        return sequence;
+    }
+
     bool rebuildLocked()
     {
         needsRebuild = false;
@@ -1489,7 +1520,22 @@ private:
 
         if (! performance.loadSequence (sequence))
         {
-            lastError = performance.getLastError();
+            const auto nativeError = performance.getLastError();
+
+            if (sequenceHasFallbackCandidate (sequence))
+            {
+                if (performance.loadSequence (makeChucKFallbackSequence (sequence)))
+                {
+                    lastError = "Native sequence failed; using ChucK fallback tracks: " + nativeError;
+                    juce::Logger::writeToLog (lastError);
+                    return true;
+                }
+
+                lastError = nativeError + " / ChucK fallback also failed: " + performance.getLastError();
+                return false;
+            }
+
+            lastError = nativeError;
             return false;
         }
 

@@ -5,8 +5,9 @@ namespace ChucKScoreScript
 std::vector<EmbeddedChucKEngine::ParameterBinding> getParameterBindings()
 {
     std::vector<EmbeddedChucKEngine::ParameterBinding> bindings;
-    bindings.reserve (1 + argumentCount);
+    bindings.reserve (2 + argumentCount);
     bindings.push_back ({ "weldScoreCommand", 0.0f, 0.0f, 999.0f });
+    bindings.push_back ({ "weldScoreFrame", 0.0f, 0.0f, 1000000000.0f });
 
     for (int i = 0; i < argumentCount; ++i)
         bindings.push_back ({ "weldScoreArg" + juce::String (i), 0.0f, -1000000.0f, 1000000.0f });
@@ -42,6 +43,7 @@ fun void weldSend(float command, float a0, float a1, float a2, float a3, float a
     a3 => weldScoreArg3;
     a4 => weldScoreArg4;
     a5 => weldScoreArg5;
+    now / samp => weldScoreFrame;
     command => weldScoreCommand;
 
     while (weldScoreCommand != 0.0)

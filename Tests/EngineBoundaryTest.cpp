@@ -475,7 +475,13 @@ while (true)
                                         EmbeddedLanguageEngine::Language::chuck,
                                         multitrackChucK,
                                         EmbeddedChucKEngine::getDefaultParameterBindings(),
-                                        1.0f });
+                                        1.0f,
+                                        true,
+                                        120.0,
+                                        4,
+                                        4,
+                                        0.0,
+                                        {} });
 
         EmbeddedPerformanceEngine::State multiState;
         multiState.name = "multi";
@@ -485,12 +491,24 @@ while (true)
                                        EmbeddedLanguageEngine::Language::chuck,
                                        multitrackChucK,
                                        EmbeddedChucKEngine::getDefaultParameterBindings(),
-                                       1.0f });
+                                       1.0f,
+                                       true,
+                                       120.0,
+                                       4,
+                                       4,
+                                       0.0,
+                                       {} });
         multiState.tracks.push_back ({ "multi-b",
                                        EmbeddedLanguageEngine::Language::chuck,
                                        multitrackChucK,
                                        EmbeddedChucKEngine::getDefaultParameterBindings(),
-                                       1.0f });
+                                       1.0f,
+                                       true,
+                                       120.0,
+                                       4,
+                                       4,
+                                       0.0,
+                                       {} });
 
         if (! singleTrack.loadSequence ({ singleState })
             || ! multiTrack.loadSequence ({ multiState })

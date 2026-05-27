@@ -32,6 +32,7 @@ struct TrackModel
     bool muted = false;
     bool soloed = false;
     juce::String code;
+    std::vector<EmbeddedPerformanceEngine::TrackGainEvent> gainEvents;
 };
 
 struct StateModel
@@ -51,6 +52,9 @@ struct ProjectModel
     int globalTimeSigDenominator = 4;
     double globalPhaseBeats = 0.0;
     juce::String chuckScoreScript;
+    std::vector<EmbeddedPerformanceEngine::TempoEvent> tempoMap;
+    std::vector<EmbeddedPerformanceEngine::TimeSignatureEvent> timeSignatureMap;
+    std::vector<EmbeddedPerformanceEngine::PhaseRotationEvent> phaseRotationMap;
     std::vector<StateModel> states;
 };
 
@@ -381,7 +385,8 @@ ProjectModel makeInitialProject()
                               "    Math.max(40.0, hostFreq) => s.freq;\n"
                               "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain => g.gain;\n"
                               "    1::samp => now;\n"
-                              "}\n" });
+                              "}\n",
+                              {} });
 
     StateModel sc;
     sc.name = "State 2";
@@ -401,7 +406,8 @@ ProjectModel makeInitialProject()
                            false,
                            "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1|\n"
                            "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain)\n"
-                           "}\n" });
+                           "}\n",
+                           {} });
 
     StateModel rtcmix;
     rtcmix.name = "State 3";
@@ -425,7 +431,8 @@ ProjectModel makeInitialProject()
                                "pan = makeconnection(\"inlet\", 3, 0.55)\n"
                                "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
                                "wave = maketable(\"wave\", 4096, \"sine\")\n"
-                               "WAVETABLE(0, 3600, gain * stategain * 32767.0, freq, pan, wave)\n" });
+                               "WAVETABLE(0, 3600, gain * stategain * 32767.0, freq, pan, wave)\n",
+                               {} });
 
     project.states.push_back (std::move (chuck));
     project.states.push_back (std::move (sc));
@@ -1427,9 +1434,15 @@ private:
         }
 
         performance.setTempoBpm (pendingProject.globalTempoBpm);
-        performance.setTempoMap ({ { 0.0, pendingProject.globalTempoBpm } });
-        performance.setTimeSignatureMap ({ { 0.0, pendingProject.globalTimeSigNumerator, pendingProject.globalTimeSigDenominator } });
-        performance.setPhaseRotationMap ({ { 0.0, pendingProject.globalPhaseBeats } });
+        performance.setTempoMap (pendingProject.tempoMap.empty()
+                                    ? std::vector<EmbeddedPerformanceEngine::TempoEvent> { { 0.0, pendingProject.globalTempoBpm } }
+                                    : pendingProject.tempoMap);
+        performance.setTimeSignatureMap (pendingProject.timeSignatureMap.empty()
+                                            ? std::vector<EmbeddedPerformanceEngine::TimeSignatureEvent> { { 0.0, pendingProject.globalTimeSigNumerator, pendingProject.globalTimeSigDenominator } }
+                                            : pendingProject.timeSignatureMap);
+        performance.setPhaseRotationMap (pendingProject.phaseRotationMap.empty()
+                                            ? std::vector<EmbeddedPerformanceEngine::PhaseRotationEvent> { { 0.0, pendingProject.globalPhaseBeats } }
+                                            : pendingProject.phaseRotationMap);
 
         std::vector<EmbeddedPerformanceEngine::State> sequence;
         sequence.reserve (pendingProject.states.size());
@@ -1455,7 +1468,8 @@ private:
                                                      track.tempoBpm,
                                                      track.timeSigNumerator,
                                                      track.timeSigDenominator,
-                                                     track.phaseBeats });
+                                                     track.phaseBeats,
+                                                     track.gainEvents });
             }
 
             if (! performanceState.tracks.empty())
@@ -1586,6 +1600,14 @@ private:
 
     static constexpr int scoreChucKSampleRate = 48000;
     static constexpr int scoreChucKBlockSize = 256;
+
+    struct ScoreCommandEvent
+    {
+        ScoreCommandId command = ScoreCommandId::none;
+        int64_t frame = 0;
+        std::array<double, ChucKScoreScript::argumentCount> args {};
+        std::array<juce::String, 2> text;
+    };
 
     void rebuildTabs()
     {
@@ -1855,8 +1877,225 @@ private:
             juce::Logger::writeToLog ("ChucK score runner prepare failed: " + scoreChucK.getLastError());
     }
 
+    static bool isAudioTimelineCommand (ScoreCommandId command) noexcept
+    {
+        return command == ScoreCommandId::tempo
+            || command == ScoreCommandId::meter
+            || command == ScoreCommandId::phase
+            || command == ScoreCommandId::trackGain
+            || command == ScoreCommandId::trackMute
+            || command == ScoreCommandId::trackSolo
+            || command == ScoreCommandId::stop;
+    }
+
+    bool captureChucKScoreScript (const juce::String& script, std::vector<ScoreCommandEvent>& events, juce::String& error)
+    {
+        EmbeddedChucKEngine captureEngine;
+        if (! captureEngine.prepare (scoreChucKSampleRate, scoreChucKBlockSize, 0, 1))
+        {
+            error = captureEngine.getLastError();
+            return false;
+        }
+
+        const auto program = ChucKScoreScript::buildProgram (script);
+        if (! captureEngine.loadProgram (program.source, ChucKScoreScript::getParameterBindings()))
+        {
+            error = captureEngine.getLastError();
+            return false;
+        }
+
+        const auto commandIndex = captureEngine.getParameterIndex ("weldScoreCommand");
+        const auto frameIndex = captureEngine.getParameterIndex ("weldScoreFrame");
+        if (commandIndex < 0 || frameIndex < 0)
+        {
+            error = "ChucK score bridge command/frame slots are unavailable";
+            return false;
+        }
+
+        std::array<int, ChucKScoreScript::argumentCount> argIndices {};
+        for (int i = 0; i < ChucKScoreScript::argumentCount; ++i)
+        {
+            argIndices[static_cast<size_t> (i)] = captureEngine.getParameterIndex ("weldScoreArg" + juce::String (i));
+            if (argIndices[static_cast<size_t> (i)] < 0)
+            {
+                error = "ChucK score bridge argument slots are unavailable";
+                return false;
+            }
+        }
+
+        juce::AudioBuffer<float> input (0, 1);
+        juce::AudioBuffer<float> output (1, 1);
+        constexpr int64_t maxScoreFrames = static_cast<int64_t> (scoreChucKSampleRate) * 60 * 30;
+
+        while (captureEngine.isReady() && static_cast<int64_t> (captureEngine.getRenderedFrameCount()) < maxScoreFrames)
+        {
+            output.clear();
+            captureEngine.process (input, output);
+            captureEngine.pullParameterValuesFromGlobals();
+
+            const auto commandId = juce::roundToInt (captureEngine.getParameterValue (commandIndex));
+            if (commandId == 0)
+                continue;
+
+            ScoreCommandEvent event;
+            event.command = static_cast<ScoreCommandId> (commandId);
+            event.frame = static_cast<int64_t> (std::llround (captureEngine.getGlobalFloatValue ("weldScoreFrame")));
+            event.text[0] = captureEngine.getGlobalStringValue ("weldScoreText0");
+            event.text[1] = captureEngine.getGlobalStringValue ("weldScoreText1");
+
+            for (int i = 0; i < ChucKScoreScript::argumentCount; ++i)
+                event.args[static_cast<size_t> (i)] = captureEngine.getParameterValue (argIndices[static_cast<size_t> (i)]);
+
+            events.push_back (std::move (event));
+            captureEngine.setParameterValue (commandIndex, 0.0f);
+
+            captureEngine.process (input, output);
+            captureEngine.pullParameterValuesFromGlobals();
+
+            if (commandId == static_cast<int> (ScoreCommandId::scoreComplete))
+                return true;
+        }
+
+        error = "ChucK score script did not finish within the 30 minute capture limit";
+        return false;
+    }
+
+    void executeCapturedScoreCommand (const ScoreCommandEvent& event)
+    {
+        scoreCommandText = event.text;
+        executeChucKScoreCommand (event.command, event.args);
+    }
+
+    void applyCapturedTimelineMaps (const std::vector<ScoreCommandEvent>& events, size_t playEventIndex)
+    {
+        project.tempoMap.clear();
+        project.timeSignatureMap.clear();
+        project.phaseRotationMap.clear();
+
+        for (auto& state : project.states)
+            for (auto& track : state.tracks)
+                track.gainEvents.clear();
+
+        auto bpm = project.globalTempoBpm;
+        auto numerator = project.globalTimeSigNumerator;
+        auto denominator = project.globalTimeSigDenominator;
+        auto phaseBeats = project.globalPhaseBeats;
+        auto beat = 0.0;
+        auto lastFrame = events[playEventIndex].frame;
+
+        project.tempoMap.push_back ({ 0.0, bpm });
+        project.timeSignatureMap.push_back ({ 0.0, numerator, denominator });
+        project.phaseRotationMap.push_back ({ 0.0, phaseBeats });
+
+        const auto stateIndex = [] (double value) { return juce::roundToInt (value) - 1; };
+        const auto trackIndex = [] (double value) { return juce::roundToInt (value) - 1; };
+
+        for (size_t i = playEventIndex + 1; i < events.size(); ++i)
+        {
+            const auto& event = events[i];
+            const auto elapsedFrames = juce::jmax<int64_t> (0, event.frame - lastFrame);
+            beat += (static_cast<double> (elapsedFrames) / static_cast<double> (scoreChucKSampleRate)) * (bpm / 60.0);
+            lastFrame = event.frame;
+
+            if (event.command == ScoreCommandId::tempo)
+            {
+                bpm = juce::jlimit (20.0, 300.0, event.args[0]);
+                project.tempoMap.push_back ({ beat, bpm });
+            }
+            else if (event.command == ScoreCommandId::meter)
+            {
+                numerator = juce::jlimit (1, 32, juce::roundToInt (event.args[0]));
+                denominator = juce::jlimit (1, 32, juce::roundToInt (event.args[1]));
+                project.timeSignatureMap.push_back ({ beat, numerator, denominator });
+            }
+            else if (event.command == ScoreCommandId::phase)
+            {
+                phaseBeats = event.args[0];
+                project.phaseRotationMap.push_back ({ beat, phaseBeats });
+            }
+            else if (event.command == ScoreCommandId::trackGain
+                     || event.command == ScoreCommandId::trackMute
+                     || event.command == ScoreCommandId::trackSolo)
+            {
+                const auto s = stateIndex (event.args[0]);
+                const auto t = trackIndex (event.args[1]);
+                if (s >= 0 && s < static_cast<int> (project.states.size()))
+                {
+                    auto& state = project.states[static_cast<size_t> (s)];
+                    if (t >= 0 && t < static_cast<int> (state.tracks.size()))
+                    {
+                        auto& track = state.tracks[static_cast<size_t> (t)];
+                        if (event.command == ScoreCommandId::trackGain)
+                            track.level = juce::jlimit (0.0f, 1.0f, static_cast<float> (event.args[2]));
+                        else if (event.command == ScoreCommandId::trackMute)
+                            track.muted = event.args[2] != 0.0;
+                        else if (event.command == ScoreCommandId::trackSolo)
+                            track.soloed = event.args[2] != 0.0;
+
+                        if (event.command == ScoreCommandId::trackGain)
+                            track.gainEvents.push_back ({ beat, effectiveTrackGain (project, s, t) });
+                        else
+                            for (int stateToUpdate = 0; stateToUpdate < static_cast<int> (project.states.size()); ++stateToUpdate)
+                            {
+                                auto& stateModel = project.states[static_cast<size_t> (stateToUpdate)];
+                                for (int trackToUpdate = 0; trackToUpdate < static_cast<int> (stateModel.tracks.size()); ++trackToUpdate)
+                                    stateModel.tracks[static_cast<size_t> (trackToUpdate)].gainEvents.push_back (
+                                        { beat, effectiveTrackGain (project, stateToUpdate, trackToUpdate) });
+                            }
+                    }
+                }
+            }
+            else if (event.command == ScoreCommandId::stop || event.command == ScoreCommandId::scoreComplete)
+            {
+                break;
+            }
+            else if (! isAudioTimelineCommand (event.command))
+            {
+                juce::Logger::writeToLog ("ChucK score command after play is not sample-scheduled in the current GUI: "
+                                          + juce::String (static_cast<int> (event.command)));
+            }
+        }
+    }
+
+    void applyCapturedChucKScoreScript (const std::vector<ScoreCommandEvent>& events)
+    {
+        auto playEventIndex = events.size();
+
+        for (size_t i = 0; i < events.size(); ++i)
+        {
+            if (events[i].command == ScoreCommandId::play)
+            {
+                playEventIndex = i;
+                break;
+            }
+
+            if (events[i].command != ScoreCommandId::scoreComplete)
+                executeCapturedScoreCommand (events[i]);
+        }
+
+        if (playEventIndex >= events.size())
+            return;
+
+        applyCapturedTimelineMaps (events, playEventIndex);
+        mixer.refresh();
+        score.syncControlsFromProject();
+        score.repaint();
+        arrangement.repaint();
+        startPlayback();
+    }
+
     void runChucKScoreScript (const juce::String& script)
     {
+        std::vector<ScoreCommandEvent> events;
+        juce::String captureError;
+        if (captureChucKScoreScript (script, events, captureError))
+        {
+            chuckScoreRunning = false;
+            applyCapturedChucKScoreScript (events);
+            return;
+        }
+
+        juce::Logger::writeToLog ("ChucK score exact capture failed; falling back to live runner: " + captureError);
         prepareChucKScoreRunner();
         if (! chuckScorePrepared)
         {
@@ -1900,6 +2139,9 @@ private:
 
     juce::String scoreText (int index) const
     {
+        if (index >= 0 && index < static_cast<int> (scoreCommandText.size()))
+            return scoreCommandText[static_cast<size_t> (index)];
+
         return scoreChucK.getGlobalStringValue ("weldScoreText" + juce::String (index));
     }
 
@@ -1945,6 +2187,8 @@ private:
                 args[static_cast<size_t> (i)] = scoreChucK.getParameterValue (parameterIndex);
         }
 
+        scoreCommandText[0] = scoreChucK.getGlobalStringValue ("weldScoreText0");
+        scoreCommandText[1] = scoreChucK.getGlobalStringValue ("weldScoreText1");
         executeChucKScoreCommand (static_cast<ScoreCommandId> (commandId), args);
         scoreChucK.setParameterValue (scoreCommandParameterIndex, 0.0f);
         if (commandId == static_cast<int> (ScoreCommandId::scoreComplete))
@@ -1971,6 +2215,9 @@ private:
             case ScoreCommandId::scoreClear:
                 quietTransportForStructureEdit();
                 project.states.clear();
+                project.tempoMap.clear();
+                project.timeSignatureMap.clear();
+                project.phaseRotationMap.clear();
                 refreshStructure (0);
                 break;
 
@@ -2180,6 +2427,7 @@ private:
     double currentBeat = 0.0;
     int scoreCommandParameterIndex = -1;
     std::array<int, ChucKScoreScript::argumentCount> scoreArgumentParameterIndices {};
+    std::array<juce::String, 2> scoreCommandText;
 };
 
 class MainWindow final : public juce::DocumentWindow

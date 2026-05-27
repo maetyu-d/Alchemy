@@ -13,6 +13,12 @@ public:
     using Language = EmbeddedLanguageEngine::Language;
     using ParameterBinding = EmbeddedLanguageEngine::ParameterBinding;
 
+    struct TrackGainEvent
+    {
+        double beat = 0.0;
+        float gain = 1.0f;
+    };
+
     struct Track
     {
         juce::String name;
@@ -25,6 +31,7 @@ public:
         int timeSignatureNumerator = 4;
         int timeSignatureDenominator = 4;
         double phaseRotationBeats = 0.0;
+        std::vector<TrackGainEvent> gainEvents;
     };
 
     struct State
@@ -143,6 +150,8 @@ private:
     float phaseRotationAtBeatUnlocked (double beat) const noexcept;
     float barBeatAtBeatUnlocked (double beat) const noexcept;
     float barPhaseAtBeatUnlocked (double beat) const noexcept;
+    float trackGainAtBeatUnlocked (const StateRuntime::TrackRuntime& trackRuntime, double beat) const noexcept;
+    float trackGainAtFrameUnlocked (const StateRuntime::TrackRuntime& trackRuntime, int64_t frame) const noexcept;
     int64_t beatToFrameUnlocked (double beat) const noexcept;
     double frameToBeatUnlocked (int64_t frame) const noexcept;
     void pushPerformanceControls (StateRuntime& stateRuntime, StateRuntime::TrackRuntime& trackRuntime, int64_t frame);

@@ -143,6 +143,17 @@ bool EmbeddedPerformanceEngine::loadSequence (const std::vector<State>& states)
                 return false;
             }
 
+            for (const auto& event : track.gainEvents)
+            {
+                if (event.beat < 0.0 || ! std::isfinite (event.beat)
+                    || event.gain < 0.0f || ! std::isfinite (event.gain))
+                {
+                    lastError = "Performance track gain events need finite non-negative beats and gains";
+                    requestedStates.clear();
+                    return false;
+                }
+            }
+
             if (! track.tightlySynced)
             {
                 if (! isFinitePositive (track.tempoBpm))
@@ -510,14 +521,18 @@ bool EmbeddedPerformanceEngine::setTrackGain (int stateIndex, int trackIndex, fl
     }
 
     const auto limitedGain = juce::jlimit (0.0f, 4.0f, gain);
-    requestedState.tracks[static_cast<size_t> (trackIndex)].gain = limitedGain;
+        requestedState.tracks[static_cast<size_t> (trackIndex)].gain = limitedGain;
+        requestedState.tracks[static_cast<size_t> (trackIndex)].gainEvents.clear();
 
-    if (stateIndex < static_cast<int> (stateRuntimes.size()))
-    {
-        auto& state = stateRuntimes[static_cast<size_t> (stateIndex)];
-        if (trackIndex < static_cast<int> (state.tracks.size()))
-            state.tracks[static_cast<size_t> (trackIndex)].definition.gain = limitedGain;
-    }
+        if (stateIndex < static_cast<int> (stateRuntimes.size()))
+        {
+            auto& state = stateRuntimes[static_cast<size_t> (stateIndex)];
+            if (trackIndex < static_cast<int> (state.tracks.size()))
+            {
+                state.tracks[static_cast<size_t> (trackIndex)].definition.gain = limitedGain;
+                state.tracks[static_cast<size_t> (trackIndex)].definition.gainEvents.clear();
+            }
+        }
 
     lastError.clear();
     return true;
@@ -750,6 +765,14 @@ int64_t EmbeddedPerformanceEngine::nextBoundaryAfterUnlocked (int64_t frame) con
             next = juce::jmin (next, runtime.endFrame);
         if (runtime.tailEndFrame > frame)
             next = juce::jmin (next, runtime.tailEndFrame);
+
+        for (const auto& track : runtime.tracks)
+            for (const auto& event : track.definition.gainEvents)
+            {
+                const auto eventFrame = beatToFrameUnlocked (event.beat);
+                if (eventFrame > frame)
+                    next = juce::jmin (next, eventFrame);
+            }
     }
 
     return next == std::numeric_limits<int64_t>::max() ? frame + maxBlockSize : next;
@@ -904,6 +927,26 @@ float EmbeddedPerformanceEngine::barPhaseAtBeatUnlocked (double beat) const noex
     return juce::jlimit (0.0f, 1.0f, barBeatAtBeatUnlocked (beat) / static_cast<float> (barLengthBeats));
 }
 
+float EmbeddedPerformanceEngine::trackGainAtBeatUnlocked (const StateRuntime::TrackRuntime& trackRuntime, double beat) const noexcept
+{
+    auto gain = juce::jlimit (0.0f, 4.0f, trackRuntime.definition.gain);
+
+    for (const auto& event : trackRuntime.definition.gainEvents)
+    {
+        if (event.beat > beat)
+            break;
+
+        gain = juce::jlimit (0.0f, 4.0f, event.gain);
+    }
+
+    return gain;
+}
+
+float EmbeddedPerformanceEngine::trackGainAtFrameUnlocked (const StateRuntime::TrackRuntime& trackRuntime, int64_t frame) const noexcept
+{
+    return trackGainAtBeatUnlocked (trackRuntime, frameToBeatUnlocked (frame));
+}
+
 int64_t EmbeddedPerformanceEngine::beatToFrameUnlocked (double beat) const noexcept
 {
     if (beat <= 0.0 || currentSampleRate <= 0.0 || tempoMap.empty())
@@ -1000,7 +1043,7 @@ void EmbeddedPerformanceEngine::pushPerformanceControls (StateRuntime& stateRunt
     static_cast<void> (trackRuntime.engine->setParameterValue ("hostBarBeat", barBeatAtBeatUnlocked (globalBeat)));
     static_cast<void> (trackRuntime.engine->setParameterValue ("hostBarPhase", barPhaseAtBeatUnlocked (globalBeat)));
     static_cast<void> (trackRuntime.engine->setParameterValue ("hostPhaseRotation", phaseRotationAtBeatUnlocked (globalBeat)));
-    static_cast<void> (trackRuntime.engine->setParameterValue ("hostTrackGain", juce::jlimit (0.0f, 4.0f, trackRuntime.definition.gain)));
+    static_cast<void> (trackRuntime.engine->setParameterValue ("hostTrackGain", trackGainAtFrameUnlocked (trackRuntime, frame)));
     static_cast<void> (trackRuntime.engine->setParameterValue ("hostTrackTempoBpm", trackTempo));
     static_cast<void> (trackRuntime.engine->setParameterValue ("hostTrackTimeSigNumerator", static_cast<float> (trackNumerator)));
     static_cast<void> (trackRuntime.engine->setParameterValue ("hostTrackTimeSigDenominator", static_cast<float> (trackDenominator)));
@@ -1040,7 +1083,8 @@ std::vector<EmbeddedPerformanceEngine::Track> EmbeddedPerformanceEngine::normali
                defaultTempoBpm,
                4,
                4,
-               0.0 } };
+               0.0,
+               {} } };
 }
 
 void EmbeddedPerformanceEngine::renderChunkUnlocked (const juce::AudioBuffer<float>& input,
@@ -1075,7 +1119,6 @@ void EmbeddedPerformanceEngine::renderChunkUnlocked (const juce::AudioBuffer<flo
             juce::AudioBuffer<float> outputView (scratchOutputPointers.data(), numOutputChannels, frames);
             track.engine->process (inputView, outputView);
 
-            const auto trackGain = juce::jlimit (0.0f, 4.0f, track.definition.gain);
             for (int channel = 0; channel < output.getNumChannels(); ++channel)
             {
                 auto* dst = output.getWritePointer (channel, offset);
@@ -1084,7 +1127,8 @@ void EmbeddedPerformanceEngine::renderChunkUnlocked (const juce::AudioBuffer<flo
 
                 for (int sample = 0; sample < frames; ++sample)
                 {
-                    const auto gain = stateGainAtFrame (runtime, frameStart + sample) * trackGain;
+                    const auto frame = frameStart + sample;
+                    const auto gain = stateGainAtFrame (runtime, frame) * trackGainAtFrameUnlocked (track, frame);
                     dst[sample] += src[sample] * gain;
                 }
             }

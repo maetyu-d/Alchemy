@@ -50,6 +50,7 @@ public:
     bool setParameterValue (const juce::String& name, float value);
     float getParameterValue (int index) const noexcept;
     void pullParameterValuesFromGlobals() noexcept;
+    double getGlobalFloatValue (const juce::String& name) const;
     juce::String getGlobalStringValue (const juce::String& name) const;
     int getParameterIndex (const juce::String& name) const;
     int getParameterCount() const noexcept { return activeParameterCount.load (std::memory_order_acquire); }

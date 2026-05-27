@@ -1552,9 +1552,10 @@ stop();
     }
 
     const auto commandIndex = engine.getParameterIndex ("weldScoreCommand");
-    if (commandIndex < 0)
+    const auto frameIndex = engine.getParameterIndex ("weldScoreFrame");
+    if (commandIndex < 0 || frameIndex < 0)
     {
-        juce::Logger::writeToLog ("Score-script test failed: command bridge missing");
+        juce::Logger::writeToLog ("Score-script test failed: command/frame bridge missing");
         return 212;
     }
 
@@ -1569,14 +1570,15 @@ stop();
         }
     }
 
-    juce::AudioBuffer<float> input (0, blockSize);
-    juce::AudioBuffer<float> output (1, blockSize);
+    juce::AudioBuffer<float> input (0, 1);
+    juce::AudioBuffer<float> output (1, 1);
     std::vector<int> commands;
+    std::vector<int> framesByCommand;
     std::vector<std::array<float, ChucKScoreScript::argumentCount>> argsByCommand;
     std::vector<std::array<juce::String, 2>> textByCommand;
 
-    constexpr int maxBlocks = 1200;
-    for (int block = 0; block < maxBlocks; ++block)
+    constexpr int maxFrames = 120000;
+    for (int frame = 0; frame < maxFrames; ++frame)
     {
         output.clear();
         engine.process (input, output);
@@ -1590,10 +1592,14 @@ stop();
                 args[static_cast<size_t> (i)] = engine.getParameterValue (argIndices[static_cast<size_t> (i)]);
 
             commands.push_back (command);
+            framesByCommand.push_back (juce::roundToInt (engine.getGlobalFloatValue ("weldScoreFrame")));
             argsByCommand.push_back (args);
             textByCommand.push_back ({ engine.getGlobalStringValue ("weldScoreText0"),
                                        engine.getGlobalStringValue ("weldScoreText1") });
             engine.setParameterValue (commandIndex, 0.0f);
+
+            engine.process (input, output);
+            engine.pullParameterValuesFromGlobals();
 
             if (command == static_cast<int> (ChucKScoreScript::CommandId::scoreComplete))
                 break;
@@ -1630,9 +1636,11 @@ stop();
         || textByCommand[5][1] != "chuck"
         || ! valuesAreClose (argsByCommand[6][2], 0.7f)
         || textByCommand[9][0] != "base64:U2luT3NjIHMgPT4gZGFjOwo="
-        || ! valuesAreClose (argsByCommand[10][2], 0.5f))
+        || ! valuesAreClose (argsByCommand[10][2], 0.5f)
+        || framesByCommand[10] != 96019)
     {
-        juce::Logger::writeToLog ("Score-script test failed: bridged arguments are wrong");
+        juce::Logger::writeToLog ("Score-script test failed: bridged arguments are wrong; phaseFrame="
+                                  + juce::String (framesByCommand[10]));
         return 215;
     }
 

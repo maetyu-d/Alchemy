@@ -752,6 +752,21 @@ void EmbeddedChucKEngine::pullParameterValuesFromGlobals() noexcept
     }
 }
 
+double EmbeddedChucKEngine::getGlobalFloatValue (const juce::String& name) const
+{
+    const juce::ScopedLock lock (engineLock);
+
+    if (! ready.load (std::memory_order_acquire) || chuck == nullptr || name.isEmpty())
+        return 0.0;
+
+    auto* globals = chuck->globals();
+    if (globals == nullptr)
+        return 0.0;
+
+    auto* value = globals->get_ptr_to_global_float (name.toStdString());
+    return value != nullptr ? *value : 0.0;
+}
+
 juce::String EmbeddedChucKEngine::getGlobalStringValue (const juce::String& name) const
 {
     const juce::ScopedLock lock (engineLock);

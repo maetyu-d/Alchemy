@@ -406,6 +406,223 @@ void setCodeEditorFontSize (juce::TextEditor& editor, float fontSize)
     editor.setFont (juce::FontOptions (fontSize));
 }
 
+class CodeEditorPane final : public juce::Component
+{
+public:
+    std::function<void()> onTextChange;
+
+    CodeEditorPane()
+    {
+        addAndMakeVisible (languageLabel);
+        languageLabel.setJustificationType (juce::Justification::centredLeft);
+        languageLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcfd8d3));
+
+        addAndMakeVisible (search);
+        search.setMultiLine (false);
+        search.setReturnKeyStartsNewLine (false);
+        search.setTextToShowWhenEmpty ("Search", juce::Colour (0xff74817c));
+        search.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff111715));
+        search.setColour (juce::TextEditor::textColourId, juce::Colour (0xffe6eee9));
+        search.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff33403c));
+        search.onTextChange = [this]
+        {
+            searchMatchIndex = 0;
+            refreshSearch();
+        };
+
+        addAndMakeVisible (previousMatch);
+        previousMatch.setButtonText ("<");
+        previousMatch.onClick = [this] { moveSearchMatch (-1); };
+
+        addAndMakeVisible (nextMatch);
+        nextMatch.setButtonText (">");
+        nextMatch.onClick = [this] { moveSearchMatch (1); };
+
+        addAndMakeVisible (statusLabel);
+        statusLabel.setJustificationType (juce::Justification::centredRight);
+        statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8fa19a));
+
+        addAndMakeVisible (gutter);
+
+        configureCodeEditor (editor, codeFontSize);
+        editor.onTextChange = [this]
+        {
+            gutter.repaint();
+            refreshStatus();
+            refreshSearch();
+            if (onTextChange != nullptr)
+                onTextChange();
+        };
+        addAndMakeVisible (editor);
+
+        setLanguage ("Code", juce::Colour (0xff69b1c9));
+        refreshStatus();
+    }
+
+    void setText (const juce::String& text, bool sendNotification)
+    {
+        editor.setText (text, sendNotification);
+        gutter.repaint();
+        refreshStatus();
+        refreshSearch();
+    }
+
+    juce::String getText() const
+    {
+        return editor.getText();
+    }
+
+    void setFontSize (float fontSize)
+    {
+        codeFontSize = juce::jlimit (10.0f, 24.0f, fontSize);
+        setCodeEditorFontSize (editor, codeFontSize);
+        gutter.repaint();
+    }
+
+    void setLanguage (const juce::String& language, juce::Colour colour)
+    {
+        accent = colour;
+        languageLabel.setText (language, juce::dontSendNotification);
+        repaint();
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        auto toolbar = area.removeFromTop (26);
+        languageLabel.setBounds (toolbar.removeFromLeft (112));
+        statusLabel.setBounds (toolbar.removeFromRight (122));
+        nextMatch.setBounds (toolbar.removeFromRight (30).reduced (3, 2));
+        previousMatch.setBounds (toolbar.removeFromRight (30).reduced (3, 2));
+        search.setBounds (toolbar.removeFromRight (juce::jmin (180, toolbar.getWidth())).reduced (4, 2));
+
+        area.removeFromTop (4);
+        gutter.setBounds (area.removeFromLeft (44));
+        editor.setBounds (area);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0xff0b0f0e));
+        g.setColour (accent.withAlpha (0.8f));
+        g.fillRect (getLocalBounds().removeFromLeft (3));
+        g.setColour (juce::Colour (0xff33403c));
+        g.drawRect (getLocalBounds());
+    }
+
+private:
+    static int countLines (const juce::String& text)
+    {
+        auto count = 1;
+        for (const auto character : text)
+            if (character == '\n')
+                ++count;
+
+        return count;
+    }
+
+    class LineNumberGutter final : public juce::Component
+    {
+    public:
+        explicit LineNumberGutter (CodeEditorPane& ownerToUse)
+            : owner (ownerToUse)
+        {
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xff111715));
+            g.setColour (juce::Colour (0xff2b3531));
+            g.drawVerticalLine (getWidth() - 1, 0.0f, static_cast<float> (getHeight()));
+
+            g.setColour (juce::Colour (0xff718079));
+            g.setFont (juce::FontOptions (owner.codeFontSize * 0.82f));
+            const auto lineHeight = juce::jmax (14, juce::roundToInt (owner.codeFontSize * 1.42f));
+            const auto lines = countLines (owner.editor.getText());
+            for (int line = 0; line < lines; ++line)
+            {
+                const auto y = 6 + line * lineHeight;
+                if (y > getHeight())
+                    break;
+
+                g.drawText (juce::String (line + 1),
+                            0,
+                            y,
+                            getWidth() - 7,
+                            lineHeight,
+                            juce::Justification::centredRight,
+                            true);
+            }
+        }
+
+    private:
+        CodeEditorPane& owner;
+    };
+
+    void refreshStatus()
+    {
+        const auto text = editor.getText();
+        const auto lines = countLines (text);
+        statusLabel.setText (juce::String (lines) + (lines == 1 ? " line" : " lines"), juce::dontSendNotification);
+    }
+
+    void refreshSearch()
+    {
+        searchMatches.clear();
+        const auto needle = search.getText();
+        if (needle.isEmpty())
+        {
+            statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8fa19a));
+            refreshStatus();
+            return;
+        }
+
+        const auto haystack = editor.getText();
+        auto offset = 0;
+        while (offset < haystack.length())
+        {
+            const auto found = haystack.indexOfIgnoreCase (offset, needle);
+            if (found < 0)
+                break;
+
+            searchMatches.push_back (found);
+            offset = found + juce::jmax (1, needle.length());
+        }
+
+        searchMatchIndex = searchMatches.empty() ? 0 : juce::jlimit (0, static_cast<int> (searchMatches.size()) - 1, searchMatchIndex);
+        statusLabel.setColour (juce::Label::textColourId, searchMatches.empty() ? juce::Colour (0xffd58b73) : juce::Colour (0xfffff0a8));
+        statusLabel.setText (searchMatches.empty()
+                                ? "No matches"
+                                : juce::String (searchMatchIndex + 1) + "/" + juce::String (searchMatches.size()),
+                             juce::dontSendNotification);
+    }
+
+    void moveSearchMatch (int delta)
+    {
+        refreshSearch();
+        if (searchMatches.empty())
+            return;
+
+        searchMatchIndex = (searchMatchIndex + delta + static_cast<int> (searchMatches.size())) % static_cast<int> (searchMatches.size());
+        const auto start = searchMatches[static_cast<size_t> (searchMatchIndex)];
+        editor.setHighlightedRegion ({ start, start + search.getText().length() });
+        editor.grabKeyboardFocus();
+        refreshSearch();
+    }
+
+    juce::Label languageLabel;
+    juce::TextEditor search;
+    juce::TextButton previousMatch;
+    juce::TextButton nextMatch;
+    juce::Label statusLabel;
+    LineNumberGutter gutter { *this };
+    juce::TextEditor editor;
+    juce::Colour accent = juce::Colour (0xff69b1c9);
+    float codeFontSize = 13.0f;
+    std::vector<int> searchMatches;
+    int searchMatchIndex = 0;
+};
+
 juce::String demoChucKMotifCode()
 {
     return "SinOsc root => Gain rootGain => Gain mix => dac;\n"
@@ -1038,14 +1255,6 @@ public:
             scoreScript.setText ({}, false);
         };
 
-        addAndMakeVisible (scoreFontDownButton);
-        scoreFontDownButton.setButtonText ("A-");
-        scoreFontDownButton.onClick = [this] { setScoreFontSize (scoreFontSize - 1.0f); };
-
-        addAndMakeVisible (scoreFontUpButton);
-        scoreFontUpButton.setButtonText ("A+");
-        scoreFontUpButton.onClick = [this] { setScoreFontSize (scoreFontSize + 1.0f); };
-
         addAndMakeVisible (scoreScript);
         configureCodeEditor (scoreScript);
         scoreScript.setText (project.chuckScoreScript, false);
@@ -1167,7 +1376,8 @@ public:
         auto area = getLocalBounds().reduced (18);
         auto top = area.removeFromTop (36);
         const auto editorWidth = scoreEditorWidthFor (area);
-        top.removeFromRight (editorWidth + 12);
+        auto editorTop = top.removeFromRight (editorWidth);
+        top.removeFromRight (12);
         title.setBounds (top.removeFromLeft (230));
         zoomOutButton.setBounds (top.removeFromLeft (32).reduced (3, 4));
         zoomInButton.setBounds (top.removeFromLeft (32).reduced (3, 4));
@@ -1181,19 +1391,14 @@ public:
         meter.setBounds (top.removeFromRight (76).reduced (6, 0));
         tempo.setBounds (top.removeFromRight (164).reduced (6, 0));
 
+        const auto scoreButtonWidth = editorTop.getWidth() / 4;
+        runScoreButton.setBounds (editorTop.removeFromLeft (scoreButtonWidth).reduced (0, 0));
+        syncScoreButton.setBounds (editorTop.removeFromLeft (scoreButtonWidth).reduced (6, 0));
+        resetScoreButton.setBounds (editorTop.removeFromLeft (scoreButtonWidth).reduced (6, 0));
+        clearScoreButton.setBounds (editorTop.reduced (6, 0));
+
         area.removeFromTop (6);
         auto editorArea = area.removeFromRight (editorWidth);
-        auto scoreButtons = editorArea.removeFromTop (28);
-        const auto buttonWidth = scoreButtons.getWidth() / 4;
-        runScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (0, 0));
-        syncScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (6, 0));
-        resetScoreButton.setBounds (scoreButtons.removeFromLeft (buttonWidth).reduced (6, 0));
-        clearScoreButton.setBounds (scoreButtons.reduced (6, 0));
-        editorArea.removeFromTop (6);
-        auto fontButtons = editorArea.removeFromTop (26);
-        scoreFontDownButton.setBounds (fontButtons.removeFromRight (44).reduced (4, 1));
-        scoreFontUpButton.setBounds (fontButtons.removeFromRight (44).reduced (4, 1));
-        editorArea.removeFromTop (4);
         scoreScript.setBounds (editorArea);
 
         const auto patchArea = getPatchArea();
@@ -1301,12 +1506,6 @@ private:
     static int scoreEditorWidthFor (juce::Rectangle<int> area)
     {
         return juce::jlimit (280, 430, area.getWidth() / 3);
-    }
-
-    void setScoreFontSize (float fontSize)
-    {
-        scoreFontSize = juce::jlimit (10.0f, 22.0f, fontSize);
-        setCodeEditorFontSize (scoreScript, scoreFontSize);
     }
 
     struct ActiveState
@@ -1584,13 +1783,10 @@ private:
     juce::TextButton syncScoreButton;
     juce::TextButton resetScoreButton;
     juce::TextButton clearScoreButton;
-    juce::TextButton scoreFontDownButton;
-    juce::TextButton scoreFontUpButton;
     juce::Slider tempo;
     juce::ComboBox meter;
     juce::Slider phase;
     juce::TextEditor scoreScript;
-    float scoreFontSize = 13.0f;
     bool isCountingIn = false;
     bool isPlaying = false;
     int selectedStateIndex = 0;
@@ -1624,6 +1820,7 @@ public:
         language.onChange = [this]
         {
             track.language = languageFromIndex (language.getSelectedId());
+            updateCodeLanguage();
             if (track.code.trim().isEmpty())
             {
                 track.code = defaultCodeForLanguage (track.language);
@@ -1693,7 +1890,8 @@ public:
         fontUpButton.onClick = [this] { setTrackCodeFontSize (codeFontSize + 1.0f); };
         addAndMakeVisible (fontUpButton);
 
-        configureCodeEditor (code, codeFontSize);
+        code.setFontSize (codeFontSize);
+        updateCodeLanguage();
         code.setText (track.code, false);
         code.onTextChange = [this] { track.code = code.getText(); };
         addAndMakeVisible (code);
@@ -1753,7 +1951,12 @@ private:
     void setTrackCodeFontSize (float fontSize)
     {
         codeFontSize = juce::jlimit (10.0f, 24.0f, fontSize);
-        setCodeEditorFontSize (code, codeFontSize);
+        code.setFontSize (codeFontSize);
+    }
+
+    void updateCodeLanguage()
+    {
+        code.setLanguage (languageName (track.language), languageColour (track.language));
     }
 
     TrackModel& track;
@@ -1767,7 +1970,7 @@ private:
     juce::TextButton clearButton;
     juce::TextButton fontDownButton;
     juce::TextButton fontUpButton;
-    juce::TextEditor code;
+    CodeEditorPane code;
     float codeFontSize = 14.0f;
 };
 

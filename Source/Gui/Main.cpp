@@ -437,23 +437,99 @@ void configureCodeEditor (juce::TextEditor& editor, float fontSize = 13.0f)
     editor.setColour (juce::TextEditor::focusedOutlineColourId, juce::Colour (0xff84c7b6));
 }
 
+juce::String demoChucKMotifCode()
+{
+    return "SinOsc root => Gain rootGain => Gain mix => dac;\n"
+           "SinOsc fifth => Gain fifthGain => mix;\n"
+           "0.62 => rootGain.gain;\n"
+           "0.38 => fifthGain.gain;\n"
+           "while (true) {\n"
+           "    Math.floor(hostStateBeat) $ int => int beat;\n"
+           "    0 => int semitone;\n"
+           "    beat % 8 => int step;\n"
+           "    if (step == 1) 3 => semitone;\n"
+           "    if (step == 2) 7 => semitone;\n"
+           "    if (step == 3) 10 => semitone;\n"
+           "    if (step == 4) 12 => semitone;\n"
+           "    if (step == 5) 7 => semitone;\n"
+           "    if (step == 6) 3 => semitone;\n"
+           "    if (step == 7) 5 => semitone;\n"
+           "    110.0 * Math.pow(2.0, semitone / 12.0) => float base;\n"
+           "    base * 2.0 => root.freq;\n"
+           "    base * 3.0 => fifth.freq;\n"
+           "    0.72 + (0.18 * Math.sin(hostBarPhase * 6.2831853)) => float motion;\n"
+           "    Math.max(0.0, Math.min(hostGain, 0.052)) * hostStateGain * hostTrackGain * motion => mix.gain;\n"
+           "    1::samp => now;\n"
+           "}\n";
+}
+
+juce::String demoChucKCodaCode()
+{
+    return "SinOsc answer => Gain answerGain => Gain mix => dac;\n"
+           "SinOsc glow => Gain glowGain => mix;\n"
+           "0.7 => answerGain.gain;\n"
+           "0.3 => glowGain.gain;\n"
+           "while (true) {\n"
+           "    Math.floor(hostStateBeat * 0.5) $ int => int phrase;\n"
+           "    12 => int semitone;\n"
+           "    phrase % 4 => int step;\n"
+           "    if (step == 1) 10 => semitone;\n"
+           "    if (step == 2) 7 => semitone;\n"
+           "    if (step == 3) 3 => semitone;\n"
+           "    110.0 * Math.pow(2.0, semitone / 12.0) => float base;\n"
+           "    base * 2.0 => answer.freq;\n"
+           "    base * 4.0 => glow.freq;\n"
+           "    Math.max(0.38, 1.0 - (hostStateBeat / 14.0)) => float settle;\n"
+           "    Math.max(0.0, Math.min(hostGain, 0.048)) * hostStateGain * hostTrackGain * settle => mix.gain;\n"
+           "    1::samp => now;\n"
+           "}\n";
+}
+
+juce::String demoSuperColliderHarmonicCode()
+{
+    return "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,\n"
+           "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
+           "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
+           "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
+           "    var base = freq.max(40);\n"
+           "    var amp = gain.min(0.032) * stateGain * trackGain;\n"
+           "    var breathe = SinOsc.kr(0.07, 0, 0.18, 0.82);\n"
+           "    SinOsc.ar([base * 1.25, base * 1.5], 0, amp * breathe)\n"
+           "        + SinOsc.ar([base * 2.0, base * 2.01], 0, amp * 0.24)\n"
+           "}\n";
+}
+
+juce::String demoRTcmixBassCode()
+{
+    return "bus_config(\"WAVETABLE\", \"out 0\")\n"
+           "freq = makeconnection(\"inlet\", 1, 220)\n"
+           "gain = makeconnection(\"inlet\", 2, 0.02)\n"
+           "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
+           "trackgain = makeconnection(\"inlet\", 14, 1.0)\n"
+           "bassfreq = freq * 0.5\n"
+           "fifth = bassfreq * 1.5\n"
+           "wave = maketable(\"wave\", 4096, \"sine\")\n"
+           "WAVETABLE(0, 3600, gain * 0.82 * stategain * trackgain * 32767.0, bassfreq, 0.43, wave)\n"
+           "WAVETABLE(0, 3600, gain * 0.30 * stategain * trackgain * 32767.0, fifth, 0.62, wave)\n";
+}
+
 juce::String defaultChucKScoreScript()
 {
     return "score.clear();\n"
            "tempo(120);\n"
            "meter(4, 4);\n"
-           "state.add(\"State 1\", 16, 4);\n"
-           "track.add(1, \"ChucK lead\", \"chuck\");\n"
-           "track.gain(1, 1, 0.75);\n"
-           "state.add(\"State 2\", 12, 4);\n"
-           "track.add(2, \"SC harmonic\", \"supercollider\");\n"
-           "track.gain(2, 1, 0.72);\n"
-           "state.add(\"State 3\", 20, 4);\n"
-           "track.add(3, \"RTcmix bass\", \"rtcmix\");\n"
-           "track.gain(3, 1, 0.65);\n"
-           "state.add(\"State 4\", 10, 4);\n"
-           "track.add(4, \"ChucK coda\", \"chuck\");\n"
-           "track.gain(4, 1, 0.68);\n"
+           "state.add(\"Motif\", 16, 5);\n"
+           "track.add(1, \"ChucK pulse canon\", \"chuck\");\n"
+           "track.gain(1, 1, 0.72);\n"
+           "state.add(\"Glass branch\", 12, 6);\n"
+           "track.add(2, \"SC glass harmonics\", \"supercollider\");\n"
+           "track.gain(2, 1, 0.62);\n"
+           "state.add(\"Low branch\", 20, 6);\n"
+           "track.add(3, \"RTcmix low pedal\", \"rtcmix\");\n"
+           "track.gain(3, 1, 0.58);\n"
+           "state.add(\"Coda\", 10, 5);\n"
+           "track.add(4, \"ChucK answer\", \"chuck\");\n"
+           "track.gain(4, 1, 0.60);\n"
            "state.connect(1, 2, 70);\n"
            "state.connect(1, 3, 30);\n"
            "state.connect(2, 3, 50);\n"
@@ -560,24 +636,10 @@ juce::String defaultCodeForLanguage (Language language)
     switch (language)
     {
         case Language::supercollider:
-            return "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,\n"
-                   "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
-                   "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
-                   "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
-                   "    var base = freq.max(40) * 1.5;\n"
-                   "    SinOsc.ar([base, base * 1.5], 0, gain.min(0.05) * stateGain * trackGain)\n"
-                   "}\n";
+            return demoSuperColliderHarmonicCode();
 
         case Language::rtcmix:
-            return "bus_config(\"WAVETABLE\", \"out 0\")\n"
-                   "freq = makeconnection(\"inlet\", 1, 220)\n"
-                   "gain = makeconnection(\"inlet\", 2, 0.02)\n"
-                   "pan = makeconnection(\"inlet\", 3, 0.55)\n"
-                   "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
-                   "trackgain = makeconnection(\"inlet\", 11, 1.0)\n"
-                   "basefreq = freq * 0.5\n"
-                   "wave = maketable(\"wave\", 4096, \"sine\")\n"
-                   "WAVETABLE(0, 3600, gain * stategain * trackgain * 32767.0, basefreq, pan, wave)\n";
+            return demoRTcmixBassCode();
 
         case Language::csound:
             return "instr 1\n"
@@ -598,12 +660,7 @@ juce::String defaultCodeForLanguage (Language language)
             break;
     }
 
-    return "SinOsc s => Gain g => dac;\n"
-           "while (true) {\n"
-           "    Math.max(40.0, hostFreq * 2.0) => s.freq;\n"
-           "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain * hostTrackGain => g.gain;\n"
-           "    1::samp => now;\n"
-           "}\n";
+    return demoChucKMotifCode();
 }
 
 juce::String chuckFallbackCodeForLanguage (Language originalLanguage)
@@ -682,102 +739,79 @@ ProjectModel makeInitialProject()
     project.states.reserve (4);
 
     StateModel chuck;
-    chuck.name = "State 1";
+    chuck.name = "Motif";
     chuck.durationBeats = 16.0;
-    chuck.tailBeats = 4.0;
+    chuck.tailBeats = 5.0;
     chuck.canvasX = 70;
     chuck.canvasY = 160;
-    chuck.tracks.push_back ({ "ChucK lead",
+    chuck.tracks.push_back ({ "ChucK pulse canon",
                               Language::chuck,
                               true,
                               120.0,
                               4,
                               4,
                               0.0,
-                              0.75f,
+                              0.72f,
                               false,
                               false,
-                              "SinOsc s => Gain g => dac;\n"
-                              "while (true) {\n"
-                              "    Math.max(40.0, hostFreq * 2.0) => s.freq;\n"
-                              "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain * hostTrackGain => g.gain;\n"
-                              "    1::samp => now;\n"
-                              "}\n",
+                              demoChucKMotifCode(),
                               {} });
 
     StateModel sc;
-    sc.name = "State 2";
+    sc.name = "Glass branch";
     sc.durationBeats = 12.0;
-    sc.tailBeats = 4.0;
+    sc.tailBeats = 6.0;
     sc.canvasX = 330;
     sc.canvasY = 60;
-    sc.tracks.push_back ({ "SC harmonic",
+    sc.tracks.push_back ({ "SC glass harmonics",
                            Language::supercollider,
                            true,
                            120.0,
                            4,
                            4,
                            0.0,
-                           0.72f,
+                           0.62f,
                            false,
                            false,
-                           "{ |freq = 330, gain = 0.04, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,\n"
-                           "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
-                           "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
-                           "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
-                           "    var base = freq.max(40) * 1.5;\n"
-                           "    SinOsc.ar([base, base * 1.5], 0, gain.min(0.05) * stateGain * trackGain)\n"
-                           "}\n",
+                           demoSuperColliderHarmonicCode(),
                            {} });
 
     StateModel rtcmix;
-    rtcmix.name = "State 3";
+    rtcmix.name = "Low branch";
     rtcmix.durationBeats = 20.0;
-    rtcmix.tailBeats = 4.0;
+    rtcmix.tailBeats = 6.0;
     rtcmix.canvasX = 330;
     rtcmix.canvasY = 230;
-    rtcmix.tracks.push_back ({ "RTcmix bass",
+    rtcmix.tracks.push_back ({ "RTcmix low pedal",
                                Language::rtcmix,
                                true,
                                120.0,
                                4,
                                4,
                                0.0,
-                               0.65f,
+                               0.58f,
                                false,
                                false,
-                               "bus_config(\"WAVETABLE\", \"out 0\")\n"
-                               "freq = makeconnection(\"inlet\", 1, 220)\n"
-                               "gain = makeconnection(\"inlet\", 2, 0.02)\n"
-                               "pan = makeconnection(\"inlet\", 3, 0.55)\n"
-                               "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
-                               "basefreq = freq * 0.5\n"
-                               "wave = maketable(\"wave\", 4096, \"sine\")\n"
-                               "WAVETABLE(0, 3600, gain * stategain * 32767.0, basefreq, pan, wave)\n",
+                               demoRTcmixBassCode(),
                                {} });
 
     StateModel coda;
-    coda.name = "State 4";
+    coda.name = "Coda";
     coda.durationBeats = 10.0;
-    coda.tailBeats = 4.0;
+    coda.tailBeats = 5.0;
     coda.canvasX = 590;
     coda.canvasY = 160;
-    coda.tracks.push_back ({ "ChucK coda",
+    coda.tracks.push_back ({ "ChucK answer",
                              Language::chuck,
                              true,
                              120.0,
                              4,
                              4,
                              0.0,
-                             0.68f,
+                             0.60f,
                              false,
                              false,
-                             "SinOsc s => Gain g => dac;\n"
-                             "while (true) {\n"
-                             "    Math.max(40.0, hostFreq * 2.5) => s.freq;\n"
-                             "    Math.max(0.0, Math.min(hostGain, 0.06)) * hostStateGain * hostTrackGain => g.gain;\n"
-                             "    1::samp => now;\n"
-                             "}\n",
+                             demoChucKCodaCode(),
                              {} });
 
     project.states.push_back (std::move (chuck));

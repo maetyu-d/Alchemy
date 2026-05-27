@@ -563,7 +563,6 @@ private:
             const auto symbolsLoaded =
                 loadRawSymbol (csoundApi.createSymbol, "csoundCreate", symbolError)
                 && loadSymbol (csoundApi.destroy, "csoundDestroy", symbolError)
-                && loadSymbol (csoundApi.setHostImplementedAudioIO, "csoundSetHostImplementedAudioIO", symbolError)
                 && loadRawSymbol (csoundApi.compileOrcSymbol, "csoundCompileOrc", symbolError)
                 && loadSymbol (csoundApi.start, "csoundStart", symbolError)
                 && loadSymbol (csoundApi.performKsmps, "csoundPerformKsmps", symbolError)
@@ -575,6 +574,7 @@ private:
             if (symbolsLoaded)
             {
                 loadOptionalSymbol (csoundApi.setOption, "csoundSetOption");
+                loadOptionalSymbol (csoundApi.setHostImplementedAudioIO, "csoundSetHostImplementedAudioIO");
                 loadOptionalSymbol (csoundApi.cleanup, "csoundCleanup");
                 loadOptionalSymbol (csoundApi.stop, "csoundStop");
                 loadOptionalSymbol (csoundApi.reset, "csoundReset");
@@ -692,7 +692,11 @@ private:
     int getOutputChannelCount (Csound* csound) const
     {
         if (csoundApi.getChannels != nullptr)
-            return static_cast<int> (csoundApi.getChannels (csound, 0));
+        {
+            const auto channels = static_cast<int> (csoundApi.getChannels (csound, 0));
+            if (channels > 0)
+                return channels;
+        }
 
         return static_cast<int> (csoundApi.getNchnls (csound));
     }
@@ -700,7 +704,11 @@ private:
     int getInputChannelCount (Csound* csound) const
     {
         if (csoundApi.getChannels != nullptr)
-            return static_cast<int> (csoundApi.getChannels (csound, 1));
+        {
+            const auto channels = static_cast<int> (csoundApi.getChannels (csound, 1));
+            if (channels > 0)
+                return channels;
+        }
 
         return static_cast<int> (csoundApi.getNchnlsInput (csound));
     }
@@ -775,12 +783,15 @@ private:
             return nullptr;
         }
 
-        csoundApi.setHostImplementedAudioIO (instance->csound, 1, 0);
+        if (csoundApi.setHostImplementedAudioIO != nullptr)
+            csoundApi.setHostImplementedAudioIO (instance->csound, 1, 0);
 
         if (csoundApi.setOption != nullptr)
         {
             static_cast<void> (csoundApi.setOption (instance->csound, "-d"));
             static_cast<void> (csoundApi.setOption (instance->csound, "-m0"));
+            if (csoundApi.setHostImplementedAudioIO == nullptr)
+                static_cast<void> (csoundApi.setOption (instance->csound, "-n"));
         }
 
         const auto orchestra = buildOrchestra (programBody).toStdString();
@@ -809,7 +820,8 @@ private:
             return nullptr;
         }
 
-        if (instance->outputChannels != numOutputChannels || instance->inputChannels != numInputChannels)
+        if (instance->outputChannels != numOutputChannels
+            || (numInputChannels > 0 && instance->inputChannels != numInputChannels))
         {
             destroyInstance (instance);
             error = "Csound orchestra channel counts did not match the host configuration";

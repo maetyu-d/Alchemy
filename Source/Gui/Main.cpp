@@ -1662,6 +1662,48 @@ private:
     bool needsRebuild = true;
 };
 
+class SplitterComponent final : public juce::Component
+{
+public:
+    std::function<void()> onDragStart;
+    std::function<void (int)> onDrag;
+    std::function<void()> onReset;
+
+    SplitterComponent()
+    {
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto area = getLocalBounds();
+        g.fillAll (juce::Colour (0xff0f1211));
+        g.setColour (isMouseOverOrDragging() ? juce::Colour (0xff84c7b6) : juce::Colour (0xff38433f));
+        g.fillRoundedRectangle (area.withSizeKeepingCentre (juce::jmax (80, area.getWidth() / 8), 3).toFloat(), 1.5f);
+    }
+
+    void mouseEnter (const juce::MouseEvent&) override { repaint(); }
+    void mouseExit (const juce::MouseEvent&) override { repaint(); }
+
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        if (onDragStart != nullptr)
+            onDragStart();
+    }
+
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (onDrag != nullptr)
+            onDrag (event.getDistanceFromDragStartY());
+    }
+
+    void mouseDoubleClick (const juce::MouseEvent&) override
+    {
+        if (onReset != nullptr)
+            onReset();
+    }
+};
+
 class MainComponent final : public juce::Component, private juce::Timer
 {
 public:
@@ -1675,6 +1717,15 @@ public:
         setWantsKeyboardFocus (true);
 
         addAndMakeVisible (score);
+        addAndMakeVisible (splitter);
+        splitter.onDragStart = [this] { dragStartTopHeight = score.getHeight(); };
+        splitter.onDrag = [this] (int deltaY) { setTopPanelHeight (dragStartTopHeight + deltaY); };
+        splitter.onReset = [this]
+        {
+            topPanelRatio = defaultTopPanelRatio;
+            resized();
+        };
+
         score.onPlay = [this] { startPlayback(); };
         score.onStop = [this] { stopPlayback(); };
         score.onAddState = [this] { addState(); };
@@ -1705,8 +1756,9 @@ public:
     void resized() override
     {
         auto area = getLocalBounds();
-        const auto topHeight = area.getHeight() / 3;
+        const auto topHeight = limitedTopPanelHeight (juce::roundToInt (area.getHeight() * topPanelRatio));
         score.setBounds (area.removeFromTop (topHeight));
+        splitter.setBounds (area.removeFromTop (splitterHeight));
         bottomBounds = area;
         layoutBottomView();
     }
@@ -1750,6 +1802,8 @@ private:
 
     static constexpr int scoreChucKSampleRate = 48000;
     static constexpr int scoreChucKBlockSize = 256;
+    static constexpr int splitterHeight = 9;
+    static constexpr double defaultTopPanelRatio = 1.0 / 3.0;
 
     struct ScoreCommandEvent
     {
@@ -1758,6 +1812,27 @@ private:
         std::array<double, ChucKScoreScript::argumentCount> args {};
         std::array<juce::String, 2> text;
     };
+
+    int limitedTopPanelHeight (int proposedHeight) const
+    {
+        const auto height = getHeight();
+        if (height <= splitterHeight)
+            return 0;
+
+        const auto minTop = juce::jmin (220, juce::jmax (80, height / 3));
+        const auto minBottom = juce::jmin (260, juce::jmax (100, height / 3));
+        const auto maxTop = juce::jmax (minTop, height - splitterHeight - minBottom);
+        return juce::jlimit (minTop, maxTop, proposedHeight);
+    }
+
+    void setTopPanelHeight (int proposedHeight)
+    {
+        const auto limitedHeight = limitedTopPanelHeight (proposedHeight);
+        if (getHeight() > 0)
+            topPanelRatio = static_cast<double> (limitedHeight) / static_cast<double> (getHeight());
+
+        resized();
+    }
 
     void rebuildTabs()
     {
@@ -2568,6 +2643,7 @@ private:
     PerformanceController audio;
     EmbeddedChucKEngine scoreChucK;
     ScoreMachineComponent score;
+    SplitterComponent splitter;
     juce::TabbedComponent tabs;
     ArrangementComponent arrangement;
     MixerComponent mixer;
@@ -2580,6 +2656,8 @@ private:
     bool playing = false;
     bool chuckScorePrepared = false;
     bool chuckScoreRunning = false;
+    int dragStartTopHeight = 0;
+    double topPanelRatio = defaultTopPanelRatio;
     double countInBeat = 0.0;
     double currentBeat = 0.0;
     int scoreCommandParameterIndex = -1;

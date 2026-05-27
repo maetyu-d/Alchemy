@@ -1,4 +1,4 @@
-# Weld ChucK
+# Alchemy
 
 This is a lean JUCE audio host with ChucK embedded in-process.
 
@@ -16,7 +16,7 @@ There is no `chuck` command-line process, no RtAudio stream, and no external aud
 The embedded engine is built as a reusable library target:
 
 ```cmake
-target_link_libraries(YourPluginOrApp PRIVATE WeldChucK::Engine)
+target_link_libraries(YourPluginOrApp PRIVATE Alchemy::Engine)
 ```
 
 Consumers include the public umbrella header:
@@ -25,7 +25,7 @@ Consumers include the public umbrella header:
 #include <WeldChucKEngine.h>
 ```
 
-The console executable is now only a host/test harness around that library. The `weld_chuck_engine` static archive contains the embedded engine object and exposes its JUCE/ChucK link requirements through CMake, so a plugin or app shell can depend on `WeldChucK::Engine` without compiling or linking the console harness.
+The console executable is now only a host/test harness around that library. The `weld_chuck_engine` static archive contains the embedded engine object and exposes its JUCE/ChucK link requirements through CMake, so a plugin or app shell can depend on `Alchemy::Engine` without compiling or linking the console harness.
 
 The public header also exposes `EmbeddedLanguageEngine`, a backend-neutral host facade with the same real-time contract as the ChucK engine:
 
@@ -36,7 +36,7 @@ engine.loadProgramAsync (programText, parameterBindings);
 engine.process (input, output);
 ```
 
-The language slots are `chuck`, `faust`, `csound`, `supercollider`, and `rtcmix`. ChucK is always built in. Csound is built as a dynamic in-process backend and loads `libcsound` at prepare time. RTcmix is built when an RTcmix checkout with `RTcmix_API.h` is available, and it dynamically loads an embedded RTcmix runtime library at prepare time. SuperCollider is built when a SuperCollider checkout with the Weld host-audio `libscsynth` patch is available, and it dynamically loads that in-process runtime at prepare time. Faust is declared as an in-process backend and fails closed until its native host-buffer integration is linked. None of these backends spawn external interpreters or open their own audio devices; unavailable builds clear output buffers if asked to render. Use `EmbeddedLanguageEngine::isLanguageBuiltIn()` and `getLanguageBuildStatus()` to check the compiled-in set at runtime.
+The language slots are `chuck`, `faust`, `csound`, `supercollider`, and `rtcmix`. ChucK is always built in. Csound is built as a dynamic in-process backend and loads `libcsound` at prepare time. RTcmix is built when an RTcmix checkout with `RTcmix_API.h` is available, and it dynamically loads an embedded RTcmix runtime library at prepare time. SuperCollider is built when a SuperCollider checkout with the Alchemy host-audio `libscsynth` patch is available, and it dynamically loads that in-process runtime at prepare time. Faust is declared as an in-process backend and fails closed until its native host-buffer integration is linked. None of these backends spawn external interpreters or open their own audio devices; unavailable builds clear output buffers if asked to render. Use `EmbeddedLanguageEngine::isLanguageBuiltIn()` and `getLanguageBuildStatus()` to check the compiled-in set at runtime.
 
 `EmbeddedPerformanceEngine` sits above the language facade for pieces that move between language states. It keeps prepared language runtimes for every track inside every state, advances a sample-clocked playhead at a global tempo, and mixes overlapping state windows so an outgoing state can keep rendering its tail while the next state starts:
 
@@ -88,7 +88,7 @@ cmake --build build --config Release
 The executable will be at:
 
 ```sh
-build/WeldChucK_artefacts/Release/WeldChucK
+build/Alchemy_artefacts/Release/Alchemy
 ```
 
 Run it from a terminal. It starts the default audio device, runs the embedded ChucK program inside the JUCE callback, and quits when you press return.
@@ -96,8 +96,8 @@ Run it from a terminal. It starts the default audio device, runs the embedded Ch
 The GUI shell builds as a separate full-screen JUCE app:
 
 ```sh
-cmake --build build --target WeldChucKGui --config Release
-open "build/WeldChucKGui_artefacts/Release/Weld ChucK GUI.app"
+cmake --build build --target AlchemyGui --config Release
+open "build/AlchemyGui_artefacts/Release/Alchemy.app"
 ```
 
 Its top third keeps the score/state visualization: state nodes, inlet/outlet-style transition cords, state add/remove controls, and a compact transport strip. ChucK is the score editor in this area; edit the score script and press `Run` to compile it in an embedded ChucK VM that drives the score/state machine through a host command bridge. The score bridge captures command sample frames from ChucK's own `now`, builds exact tempo, meter, phase, stop, and track gain schedules, then starts playback from that prepared audio timeline instead of relying on the GUI timer. Press `Sync` to regenerate the ChucK score from the current GUI states/tracks, `Template` to restore the starter score, or `Clear` to empty the score pane. The lower two thirds switch between per-state track tabs, an arrangement view during count-in/playback, and a mixer view. Each state tab has track add/remove controls. Each track stores an accepted language program and defaults to tight global timing while allowing local tempo, meter, and phase overrides. If an optional native backend cannot prepare or rejects a program, the GUI logs the native failure and retries that sequence with ChucK fallback tracks so the arrangement remains audible.
@@ -135,8 +135,8 @@ Supported score calls include `score.clear()`, `tempo(bpm)`, `meter(numerator, d
 To audition the multi-state performance path through the default output device:
 
 ```sh
-build/WeldChucK_artefacts/Release/WeldChucK --quick-performance-demo
-build/WeldChucK_artefacts/Release/WeldChucK --performance-demo
+build/Alchemy_artefacts/Release/Alchemy --quick-performance-demo
+build/Alchemy_artefacts/Release/Alchemy --performance-demo
 ```
 
 The quick demo compresses the ChucK -> SuperCollider -> RTcmix sequence into a short check. The full demo uses the longer ChucK, SuperCollider, RTcmix, and coda states, with outgoing tails left running across transitions. The GUI demo starts from a branching state graph: State 1 has weighted 70/30 outgoing paths, and State 2 has weighted 50/50 outgoing paths.
@@ -144,17 +144,17 @@ The quick demo compresses the ChucK -> SuperCollider -> RTcmix sequence into a s
 Run the headless engine self-test with:
 
 ```sh
-build/WeldChucK_artefacts/Release/WeldChucK --self-test
-build/WeldChucK_artefacts/Release/WeldChucK --stress-test
-build/WeldChucK_artefacts/Release/WeldChucK --callback-test
-build/WeldChucK_artefacts/Release/WeldChucK --fuzz-test
-build/WeldChucK_artefacts/Release/WeldChucK --program-test
-build/WeldChucK_artefacts/Release/WeldChucK --parameter-test
-build/WeldChucK_artefacts/Release/WeldChucK --async-program-test
-build/WeldChucK_artefacts/Release/WeldChucK --score-script-test
-build/WeldChucK_artefacts/Release/WeldChucK --boundary-test
-build/WeldChucK_artefacts/Release/WeldChucK --concurrency-test
-build/WeldChucKEngineBoundaryTest
+build/Alchemy_artefacts/Release/Alchemy --self-test
+build/Alchemy_artefacts/Release/Alchemy --stress-test
+build/Alchemy_artefacts/Release/Alchemy --callback-test
+build/Alchemy_artefacts/Release/Alchemy --fuzz-test
+build/Alchemy_artefacts/Release/Alchemy --program-test
+build/Alchemy_artefacts/Release/Alchemy --parameter-test
+build/Alchemy_artefacts/Release/Alchemy --async-program-test
+build/Alchemy_artefacts/Release/Alchemy --score-script-test
+build/Alchemy_artefacts/Release/Alchemy --boundary-test
+build/Alchemy_artefacts/Release/Alchemy --concurrency-test
+build/AlchemyEngineBoundaryTest
 /Users/user/.local/opt/cmake/CMake.app/Contents/bin/ctest --test-dir build --output-on-failure
 ```
 
@@ -166,7 +166,7 @@ cmake --build build --target check
 
 ### RTcmix Backend
 
-Build RTcmix's embedded runtime before configuring Weld if you want the RTcmix backend active:
+Build RTcmix's embedded runtime before configuring Alchemy if you want the RTcmix backend active:
 
 ```sh
 git clone https://github.com/RTcmix/RTcmix.git third_party/rtcmix
@@ -177,11 +177,11 @@ git apply ../patches/rtcmix-embedded-weld.patch
 make BUILDTYPE=OSXEMBEDDED AUDIODRIVER=EMBEDDEDAUDIO RTLIBTYPE=DYNAMIC
 ```
 
-The Weld CMake configure step looks for `third_party/rtcmix/src/rtcmix/RTcmix_API.h` and records a runtime library hint for `librtcmix_embedded.dylib` or `librtcmix_embedded.so`. You can override that path with `-DWELD_RTCMIX_LIBRARY=/path/to/librtcmix_embedded.dylib` or by setting the `WELD_RTCMIX_LIBRARY` environment variable before running the host.
+The Alchemy CMake configure step looks for `third_party/rtcmix/src/rtcmix/RTcmix_API.h` and records a runtime library hint for `librtcmix_embedded.dylib` or `librtcmix_embedded.so`. You can override that path with `-DWELD_RTCMIX_LIBRARY=/path/to/librtcmix_embedded.dylib` or by setting the `WELD_RTCMIX_LIBRARY` environment variable before running the host.
 
 ### Csound Backend
 
-Build Csound from source before configuring Weld if you want the Csound backend to render locally:
+Build Csound from source before configuring Alchemy if you want the Csound backend to render locally:
 
 ```sh
 git clone --depth 1 https://github.com/csound/csound.git third_party/csound
@@ -197,9 +197,9 @@ cmake --build build-csound --target CsoundLib64
 
 On macOS, Apple's `/usr/bin/bison` may be too old for current Csound source. Build or install a newer GNU Bison and pass `-DBISON_EXECUTABLE=/path/to/bison` to the Csound configure command if parser generation fails.
 
-The Weld CMake configure step records a runtime hint for `build-csound/CsoundLib64.framework/CsoundLib64` on macOS or `build-csound/libcsound64.so`/`.dylib` on Unix-style builds. You can override that path with `-DWELD_CSOUND_LIBRARY=/path/to/libcsound64.dylib` or by setting the `WELD_CSOUND_LIBRARY` environment variable before running the host.
+The Alchemy CMake configure step records a runtime hint for `build-csound/CsoundLib64.framework/CsoundLib64` on macOS or `build-csound/libcsound64.so`/`.dylib` on Unix-style builds. You can override that path with `-DWELD_CSOUND_LIBRARY=/path/to/libcsound64.dylib` or by setting the `WELD_CSOUND_LIBRARY` environment variable before running the host.
 
-Csound source loading is in-process and host-pulled. Weld injects `sr`, `ksmps = 1`, `nchnls`, `nchnls_i`, and `0dbfs = 1` around the orchestra body, creates a private Csound instance off the audio callback, starts it with host-implemented audio I/O, schedules `i 1 0 -1`, then swaps the prepared instance into the render path. The audio callback writes directly to Csound's `spin` buffer, calls `csoundPerformKsmps()` once per host sample, reads directly from `spout`, and maps host parameters to Csound control channels such as:
+Csound source loading is in-process and host-pulled. Alchemy injects `sr`, `ksmps = 1`, `nchnls`, `nchnls_i`, and `0dbfs = 1` around the orchestra body, creates a private Csound instance off the audio callback, starts it with host-implemented audio I/O, schedules `i 1 0 -1`, then swaps the prepared instance into the render path. The audio callback writes directly to Csound's `spin` buffer, calls `csoundPerformKsmps()` once per host sample, reads directly from `spout`, and maps host parameters to Csound control channels such as:
 
 ```csound
 instr 1
@@ -213,7 +213,7 @@ endin
 
 ### SuperCollider Backend
 
-Build SuperCollider's host-audio `libscsynth`, embedded language bridge, and the UGen plugins your source uses before configuring Weld if you want the SuperCollider backend active:
+Build SuperCollider's host-audio `libscsynth`, embedded language bridge, and the UGen plugins your source uses before configuring Alchemy if you want the SuperCollider backend active:
 
 ```sh
 git clone https://github.com/supercollider/supercollider.git third_party/supercollider
@@ -229,9 +229,9 @@ cmake --build build-supercollider-host --target libscsynth weldsclang
 cmake --build build-supercollider-host --target OscUGens LFUGens IOUGens MulAddUGens BinaryOpUGens UnaryOpUGens
 ```
 
-The Weld CMake configure step looks for `third_party/supercollider/include/server/SC_WorldOptions.h` and records runtime hints for `build-supercollider-host/server/scsynth/libscsynth.dylib` and `build-supercollider-host/lang/libweldsclang.dylib`. You can override those paths with `-DWELD_SUPERCOLLIDER_LIBRARY=/path/to/libscsynth.dylib` and `-DWELD_SUPERCOLLIDER_LANG_LIBRARY=/path/to/libweldsclang.dylib`, or with the matching environment variables before running the host.
+The Alchemy CMake configure step looks for `third_party/supercollider/include/server/SC_WorldOptions.h` and records runtime hints for `build-supercollider-host/server/scsynth/libscsynth.dylib` and `build-supercollider-host/lang/libweldsclang.dylib`. You can override those paths with `-DWELD_SUPERCOLLIDER_LIBRARY=/path/to/libscsynth.dylib` and `-DWELD_SUPERCOLLIDER_LANG_LIBRARY=/path/to/libweldsclang.dylib`, or with the matching environment variables before running the host.
 
-SuperCollider source loading is in-process: Weld asks the embedded `libsclang` bridge to compile source text into SynthDef bytes off the audio callback, sends `/d_recv` and `/s_new` directly into the private `libscsynth` world, then renders by host-pulling audio. A source body may evaluate to a `SynthDef` named `weldMain`, or more conveniently to a `Function`; function arguments receive the performance control bus in binding order, starting with `hostFreq`, `hostGain`, `hostBlend`, `hostStateGate`, `hostStateGain`, and continuing through the track tempo, meter, phase, and gain controls:
+SuperCollider source loading is in-process: Alchemy asks the embedded `libsclang` bridge to compile source text into SynthDef bytes off the audio callback, sends `/d_recv` and `/s_new` directly into the private `libscsynth` world, then renders by host-pulling audio. A source body may evaluate to a `SynthDef` named `weldMain`, or more conveniently to a `Function`; function arguments receive the performance control bus in binding order, starting with `hostFreq`, `hostGain`, `hostBlend`, `hostStateGate`, `hostStateGain`, and continuing through the track tempo, meter, phase, and gain controls:
 
 ```supercollider
 { |freq = 440, gain = 0.1, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,
@@ -248,11 +248,11 @@ The first prototype disables ChucK MIDI, HID, serial, shell, and on-the-fly netw
 The multi-language facade keeps the same tightness boundary for future language backends:
 
 - Faust should be embedded through libfaust's LLVM or interpreter factory API, creating a candidate DSP instance off the audio callback and calling `dsp::compute()` from the host-owned render path after commit.
-- Csound is embedded through `libcsound` with host-implemented audio I/O. Weld compiles an orchestra body into a private candidate instance, forces `ksmps = 1`, maps controls through Csound software channels, drives `spin`/`spout` directly, and performs one Csound k-cycle per host sample so parameter and audio exchange are sample-tight.
-- SuperCollider is embedded as `libscsynth` plus an in-process `libsclang` bridge, not by launching `scsynth`/`sclang` or using OSC to an external server. Weld's host-pulled audio driver/world adapter lets JUCE own the callback, feeds SC input/output buses directly, compiles SC source to SynthDef bytes off the audio callback, and commits server packets directly into the private world.
-- RTcmix is embedded through its `EMBEDDEDAUDIO` C API. Weld loads the embedded runtime in-process, configures float interleaved buffers, maps host parameters to `makeconnection("inlet", ...)` pfields, and calls `RTcmix_runAudio()` from the host render path. RTcmix-owned audio threads or command-line `CMIX` execution do not meet this repository's tightness rule.
+- Csound is embedded through `libcsound` with host-implemented audio I/O. Alchemy compiles an orchestra body into a private candidate instance, forces `ksmps = 1`, maps controls through Csound software channels, drives `spin`/`spout` directly, and performs one Csound k-cycle per host sample so parameter and audio exchange are sample-tight.
+- SuperCollider is embedded as `libscsynth` plus an in-process `libsclang` bridge, not by launching `scsynth`/`sclang` or using OSC to an external server. Alchemy's host-pulled audio driver/world adapter lets JUCE own the callback, feeds SC input/output buses directly, compiles SC source to SynthDef bytes off the audio callback, and commits server packets directly into the private world.
+- RTcmix is embedded through its `EMBEDDEDAUDIO` C API. Alchemy loads the embedded runtime in-process, configures float interleaved buffers, maps host parameters to `makeconnection("inlet", ...)` pfields, and calls `RTcmix_runAudio()` from the host render path. RTcmix-owned audio threads or command-line `CMIX` execution do not meet this repository's tightness rule.
 
-RTcmix's public embedded API is a process-global runtime, so Weld allows only one active RTcmix engine at a time. Score loading is off the audio callback and fails silent, but it is not as transactional as the ChucK VM swap because stock RTcmix does not expose separate candidate worlds for parse/commit/rollback.
+RTcmix's public embedded API is a process-global runtime, so Alchemy allows only one active RTcmix engine at a time. Score loading is off the audio callback and fails silent, but it is not as transactional as the ChucK VM swap because stock RTcmix does not expose separate candidate worlds for parse/commit/rollback.
 
 The performance sequencer is host-clocked rather than language-clocked: state starts, state ends, and tail windows are converted from musical beats to absolute sample frames through the active tempo map. The time-signature map and phase-rotation map describe the score grid that states and controllers see, without letting meter metadata disturb the audio callback clock. ChucK score commands drive this scheduler with ChucK-style timing while the sound-producing states remain free to be ChucK, SuperCollider, Csound, RTcmix, or Faust.
 

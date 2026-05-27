@@ -3416,7 +3416,7 @@ private:
     {
         const juce::ScopedLock lock (errorLock);
         lastError = EmbeddedLanguageEngine::getLanguageName (language)
-                    + " backend is not built into this Weld binary. Link its native SDK and enable the backend at CMake configure time.";
+                    + " backend is not built into this Alchemy binary. Link its native SDK and enable the backend at CMake configure time.";
     }
 
     EmbeddedLanguageEngine::Language language;

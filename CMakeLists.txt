@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(WeldChucK VERSION 0.1.0 LANGUAGES C CXX)
+project(Alchemy VERSION 0.1.0 LANGUAGES C CXX)
 enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -13,7 +13,7 @@ set(CHUCK_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/chuck/src/core")
 set(WELD_RTCMIX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rtcmix" CACHE PATH "Path to an RTcmix checkout with an embedded build")
 set(WELD_RTCMIX_LIBRARY "" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib or librtcmix_embedded.so")
 set(WELD_CSOUND_LIBRARY "" CACHE FILEPATH "Optional path to libcsound64.dylib, libcsound.dylib, or libcsound.so")
-set(WELD_SUPERCOLLIDER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/supercollider" CACHE PATH "Path to a SuperCollider checkout with the Weld host audio backend")
+set(WELD_SUPERCOLLIDER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/supercollider" CACHE PATH "Path to a SuperCollider checkout with the Alchemy host audio backend")
 set(WELD_SUPERCOLLIDER_LIBRARY "" CACHE FILEPATH "Optional path to a host-audio libscsynth.dylib or libscsynth.so")
 set(WELD_SUPERCOLLIDER_LANG_LIBRARY "" CACHE FILEPATH "Optional path to libweldsclang.dylib or libweldsclang.so")
 
@@ -203,6 +203,7 @@ target_compile_options(chuck_core
         -Wno-extra-semi)
 
 add_library(weld_chuck_engine STATIC)
+add_library(Alchemy::Engine ALIAS weld_chuck_engine)
 add_library(WeldChucK::Engine ALIAS weld_chuck_engine)
 
 target_sources(weld_chuck_engine
@@ -263,18 +264,18 @@ target_compile_definitions(weld_chuck_engine
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0)
 
-juce_add_console_app(WeldChucK
-    PRODUCT_NAME "Weld ChucK"
+juce_add_console_app(Alchemy
+    PRODUCT_NAME "Alchemy"
     COMPANY_NAME "Codex"
-    BUNDLE_ID "com.codex.weldchuck")
+    BUNDLE_ID "com.codex.alchemy")
 
-target_sources(WeldChucK
+target_sources(Alchemy
     PRIVATE
         Source/Main.cpp)
 
-target_link_libraries(WeldChucK
+target_link_libraries(Alchemy
     PRIVATE
-        WeldChucK::Engine
+        Alchemy::Engine
         juce::juce_audio_devices
         juce::juce_data_structures
         juce::juce_events
@@ -282,18 +283,18 @@ target_link_libraries(WeldChucK
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-juce_add_gui_app(WeldChucKGui
-    PRODUCT_NAME "Weld ChucK GUI"
+juce_add_gui_app(AlchemyGui
+    PRODUCT_NAME "Alchemy"
     COMPANY_NAME "Codex"
-    BUNDLE_ID "com.codex.weldchuck.gui")
+    BUNDLE_ID "com.codex.alchemy.gui")
 
-target_sources(WeldChucKGui
+target_sources(AlchemyGui
     PRIVATE
         Source/Gui/Main.cpp)
 
-target_link_libraries(WeldChucKGui
+target_link_libraries(AlchemyGui
     PRIVATE
-        WeldChucK::Engine
+        Alchemy::Engine
         juce::juce_audio_devices
         juce::juce_data_structures
         juce::juce_events
@@ -302,41 +303,41 @@ target_link_libraries(WeldChucKGui
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-add_executable(WeldChucKEngineBoundaryTest
+add_executable(AlchemyEngineBoundaryTest
     Tests/EngineBoundaryTest.cpp)
 
-target_link_libraries(WeldChucKEngineBoundaryTest
+target_link_libraries(AlchemyEngineBoundaryTest
     PRIVATE
-        WeldChucK::Engine
+        Alchemy::Engine
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
-add_test(NAME WeldChucKSelfTest COMMAND WeldChucK --self-test)
-add_test(NAME WeldChucKStressTest COMMAND WeldChucK --stress-test)
-add_test(NAME WeldChucKCallbackTest COMMAND WeldChucK --callback-test)
-add_test(NAME WeldChucKFuzzTest COMMAND WeldChucK --fuzz-test)
-add_test(NAME WeldChucKProgramTest COMMAND WeldChucK --program-test)
-add_test(NAME WeldChucKParameterTest COMMAND WeldChucK --parameter-test)
-add_test(NAME WeldChucKAsyncProgramTest COMMAND WeldChucK --async-program-test)
-add_test(NAME WeldChucKScoreScriptTest COMMAND WeldChucK --score-script-test)
-add_test(NAME WeldChucKBoundaryTest COMMAND WeldChucK --boundary-test)
-add_test(NAME WeldChucKConcurrencyTest COMMAND WeldChucK --concurrency-test)
-add_test(NAME WeldChucKEngineBoundaryTest COMMAND WeldChucKEngineBoundaryTest)
+add_test(NAME AlchemySelfTest COMMAND Alchemy --self-test)
+add_test(NAME AlchemyStressTest COMMAND Alchemy --stress-test)
+add_test(NAME AlchemyCallbackTest COMMAND Alchemy --callback-test)
+add_test(NAME AlchemyFuzzTest COMMAND Alchemy --fuzz-test)
+add_test(NAME AlchemyProgramTest COMMAND Alchemy --program-test)
+add_test(NAME AlchemyParameterTest COMMAND Alchemy --parameter-test)
+add_test(NAME AlchemyAsyncProgramTest COMMAND Alchemy --async-program-test)
+add_test(NAME AlchemyScoreScriptTest COMMAND Alchemy --score-script-test)
+add_test(NAME AlchemyBoundaryTest COMMAND Alchemy --boundary-test)
+add_test(NAME AlchemyConcurrencyTest COMMAND Alchemy --concurrency-test)
+add_test(NAME AlchemyEngineBoundaryTest COMMAND AlchemyEngineBoundaryTest)
 
-set_tests_properties(WeldChucKSelfTest
-                     WeldChucKStressTest
-                     WeldChucKCallbackTest
-                     WeldChucKFuzzTest
-                     WeldChucKProgramTest
-                     WeldChucKParameterTest
-                     WeldChucKAsyncProgramTest
-                     WeldChucKScoreScriptTest
-                     WeldChucKBoundaryTest
-                     WeldChucKConcurrencyTest
-                     WeldChucKEngineBoundaryTest
+set_tests_properties(AlchemySelfTest
+                     AlchemyStressTest
+                     AlchemyCallbackTest
+                     AlchemyFuzzTest
+                     AlchemyProgramTest
+                     AlchemyParameterTest
+                     AlchemyAsyncProgramTest
+                     AlchemyScoreScriptTest
+                     AlchemyBoundaryTest
+                     AlchemyConcurrencyTest
+                     AlchemyEngineBoundaryTest
     PROPERTIES
         TIMEOUT 30)
 
 add_custom_target(check
     COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-    DEPENDS WeldChucK WeldChucKEngineBoundaryTest)
+    DEPENDS Alchemy AlchemyEngineBoundaryTest)

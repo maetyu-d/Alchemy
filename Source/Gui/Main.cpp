@@ -3306,10 +3306,10 @@ public:
     }
 };
 
-class WeldChucKGuiApplication final : public juce::JUCEApplication
+class AlchemyApplication final : public juce::JUCEApplication
 {
 public:
-    const juce::String getApplicationName() override { return "Weld ChucK GUI"; }
+    const juce::String getApplicationName() override { return "Alchemy"; }
     const juce::String getApplicationVersion() override { return "0.1.0"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
@@ -3333,4 +3333,4 @@ private:
 };
 } // namespace
 
-START_JUCE_APPLICATION (WeldChucKGuiApplication)
+START_JUCE_APPLICATION (AlchemyApplication)

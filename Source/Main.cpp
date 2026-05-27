@@ -2162,7 +2162,7 @@ int main (int argc, char* argv[])
 
     deviceManager.addAudioCallback (&callback);
 
-    juce::Logger::writeToLog ("Weld ChucK is running with ChucK embedded in the JUCE audio callback.");
+    juce::Logger::writeToLog ("Alchemy is running with ChucK embedded in the JUCE audio callback.");
     juce::Logger::writeToLog ("Press return to quit.");
     std::cin.get();
 

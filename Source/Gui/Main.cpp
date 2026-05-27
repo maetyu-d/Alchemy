@@ -1130,12 +1130,13 @@ public:
 
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
         auto timeline = area.removeFromTop (juce::jmax (80, area.getHeight() / 4));
-        auto x = timeline.getX();
+        auto stateStartBeat = 0.0;
 
         for (const auto& state : project.states)
         {
-            const auto width = juce::roundToInt (timeline.getWidth() * state.durationBeats / totalBeats);
-            auto block = juce::Rectangle<int> (x, timeline.getY(), width - 4, timeline.getHeight());
+            const auto startX = beatToX (timeline, stateStartBeat, totalBeats);
+            const auto endX = beatToX (timeline, stateStartBeat + state.durationBeats, totalBeats);
+            auto block = juce::Rectangle<int> (startX, timeline.getY(), juce::jmax (1, endX - startX - 4), timeline.getHeight());
             g.setColour (juce::Colour (0xff202725));
             g.fillRect (block);
             g.setColour (juce::Colour (0xff53605c));
@@ -1143,7 +1144,7 @@ public:
             g.setColour (juce::Colour (0xffedf2ef));
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
             g.drawText (state.name, block.reduced (10), juce::Justification::centredLeft, true);
-            x += width;
+            stateStartBeat += state.durationBeats;
         }
 
         if (playing)
@@ -1168,6 +1169,11 @@ private:
         g.drawLine (static_cast<float> (x), static_cast<float> (timeline.getY()), static_cast<float> (x), static_cast<float> (timeline.getBottom()), 2.5f);
     }
 
+    static int beatToX (juce::Rectangle<int> area, double beat, double totalBeats)
+    {
+        return area.getX() + juce::roundToInt (area.getWidth() * juce::jlimit (0.0, 1.0, beat / juce::jmax (1.0, totalBeats)));
+    }
+
     void drawTrackLanes (juce::Graphics& g, juce::Rectangle<int> area)
     {
         int laneCount = 0;
@@ -1177,23 +1183,51 @@ private:
         const auto laneHeight = juce::jmax (28, area.getHeight() / juce::jmax (1, laneCount));
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
 
+        auto stateStartBeat = 0.0;
         for (const auto& state : project.states)
         {
             for (const auto& track : state.tracks)
             {
                 auto lane = area.removeFromTop (laneHeight).reduced (0, 3);
+                const auto laneBounds = lane;
                 g.setColour (juce::Colour (0xff1b201f));
-                g.fillRect (lane);
-                g.setColour (languageColour (track.language).withAlpha (0.82f));
-                const auto clipWidth = juce::roundToInt (lane.getWidth() * state.durationBeats / totalBeats);
-                g.fillRect (lane.removeFromLeft (clipWidth));
+                g.fillRect (laneBounds);
+
+                const auto stateStartX = beatToX (laneBounds, stateStartBeat, totalBeats);
+                const auto stateEndX = beatToX (laneBounds, stateStartBeat + state.durationBeats, totalBeats);
+                const auto tailEndX = beatToX (laneBounds, stateStartBeat + state.durationBeats + state.tailBeats, totalBeats);
+                auto clip = juce::Rectangle<int> (stateStartX,
+                                                  laneBounds.getY(),
+                                                  juce::jmax (1, stateEndX - stateStartX),
+                                                  laneBounds.getHeight());
+                auto tail = juce::Rectangle<int> (stateEndX,
+                                                  laneBounds.getY(),
+                                                  juce::jmax (0, tailEndX - stateEndX),
+                                                  laneBounds.getHeight());
+
+                const auto colour = languageColour (track.language);
+                if (! tail.isEmpty())
+                {
+                    g.setColour (colour.withAlpha (0.26f));
+                    g.fillRect (tail);
+                }
+
+                g.setColour (colour.withAlpha (0.82f));
+                g.fillRect (clip);
+                g.setColour (colour.withAlpha (0.95f));
+                g.drawRect (clip);
+                if (! tail.isEmpty())
+                    g.drawRect (tail);
+
                 g.setColour (juce::Colour (0xff101211));
                 g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
                 g.drawText (state.name + " / " + track.name + " / " + languageName (track.language),
-                            lane.withX (area.getX()).withWidth (area.getWidth()).reduced (8, 0),
+                            clip.reduced (8, 0).withRight (juce::jmax (clip.getRight(), laneBounds.getX() + 180)),
                             juce::Justification::centredLeft,
                             true);
             }
+
+            stateStartBeat += state.durationBeats;
         }
     }
 

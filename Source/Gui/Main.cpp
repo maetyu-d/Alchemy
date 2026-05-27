@@ -304,18 +304,20 @@ juce::String defaultCodeForLanguage (Language language)
                    "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
                    "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
                    "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
-                   "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain * trackGain)\n"
+                   "    var base = freq.max(40) * 1.5;\n"
+                   "    SinOsc.ar([base, base * 1.5], 0, gain.min(0.05) * stateGain * trackGain)\n"
                    "}\n";
 
         case Language::rtcmix:
             return "bus_config(\"WAVETABLE\", \"out 0\")\n"
-                   "freq = makeconnection(\"inlet\", 1, 165)\n"
+                   "freq = makeconnection(\"inlet\", 1, 220)\n"
                    "gain = makeconnection(\"inlet\", 2, 0.02)\n"
                    "pan = makeconnection(\"inlet\", 3, 0.55)\n"
                    "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
                    "trackgain = makeconnection(\"inlet\", 11, 1.0)\n"
+                   "basefreq = freq * 0.5\n"
                    "wave = maketable(\"wave\", 4096, \"sine\")\n"
-                   "WAVETABLE(0, 3600, gain * stategain * trackgain * 32767.0, freq, pan, wave)\n";
+                   "WAVETABLE(0, 3600, gain * stategain * trackgain * 32767.0, basefreq, pan, wave)\n";
 
         case Language::csound:
             return "instr 1\n"
@@ -338,10 +340,58 @@ juce::String defaultCodeForLanguage (Language language)
 
     return "SinOsc s => Gain g => dac;\n"
            "while (true) {\n"
-           "    Math.max(40.0, hostFreq) => s.freq;\n"
+           "    Math.max(40.0, hostFreq * 2.0) => s.freq;\n"
            "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain * hostTrackGain => g.gain;\n"
            "    1::samp => now;\n"
            "}\n";
+}
+
+juce::String chuckFallbackCodeForLanguage (Language originalLanguage)
+{
+    switch (originalLanguage)
+    {
+        case Language::supercollider:
+            return "SinOsc a => Gain ag => Gain g => dac;\n"
+                   "SinOsc b => Gain bg => g;\n"
+                   "0.62 => ag.gain;\n"
+                   "0.38 => bg.gain;\n"
+                   "while (true) {\n"
+                   "    Math.max(40.0, hostFreq * 1.5) => float base;\n"
+                   "    base => a.freq;\n"
+                   "    base * 1.5 => b.freq;\n"
+                   "    Math.max(0.0, Math.min(hostGain, 0.07)) * hostStateGain * hostTrackGain => g.gain;\n"
+                   "    1::samp => now;\n"
+                   "}\n";
+
+        case Language::rtcmix:
+            return "SinOsc s => Gain g => dac;\n"
+                   "while (true) {\n"
+                   "    Math.max(40.0, hostFreq * 0.5) => s.freq;\n"
+                   "    Math.max(0.0, Math.min(hostGain, 0.075)) * hostStateGain * hostTrackGain => g.gain;\n"
+                   "    1::samp => now;\n"
+                   "}\n";
+
+        case Language::csound:
+            return "SinOsc s => Gain g => dac;\n"
+                   "while (true) {\n"
+                   "    Math.max(40.0, hostFreq * 1.25) => s.freq;\n"
+                   "    Math.max(0.0, Math.min(hostGain, 0.07)) * hostStateGain * hostTrackGain => g.gain;\n"
+                   "    1::samp => now;\n"
+                   "}\n";
+
+        case Language::faust:
+            return "SinOsc s => Gain g => dac;\n"
+                   "while (true) {\n"
+                   "    Math.max(40.0, hostFreq * 2.5) => s.freq;\n"
+                   "    Math.max(0.0, Math.min(hostGain, 0.055)) * hostStateGain * hostTrackGain => g.gain;\n"
+                   "    1::samp => now;\n"
+                   "}\n";
+
+        case Language::chuck:
+            break;
+    }
+
+    return defaultCodeForLanguage (Language::chuck);
 }
 
 TrackModel makeTrack (juce::String name, Language language)
@@ -389,8 +439,8 @@ ProjectModel makeInitialProject()
                               false,
                               "SinOsc s => Gain g => dac;\n"
                               "while (true) {\n"
-                              "    Math.max(40.0, hostFreq) => s.freq;\n"
-                              "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain => g.gain;\n"
+                              "    Math.max(40.0, hostFreq * 2.0) => s.freq;\n"
+                              "    Math.max(0.0, Math.min(hostGain, 0.08)) * hostStateGain * hostTrackGain => g.gain;\n"
                               "    1::samp => now;\n"
                               "}\n",
                               {} });
@@ -415,7 +465,8 @@ ProjectModel makeInitialProject()
                            "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
                            "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 120,\n"
                            "   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n"
-                           "    SinOsc.ar([freq, freq * 1.003], 0, gain.min(0.05) * stateGain * trackGain)\n"
+                           "    var base = freq.max(40) * 1.5;\n"
+                           "    SinOsc.ar([base, base * 1.5], 0, gain.min(0.05) * stateGain * trackGain)\n"
                            "}\n",
                            {} });
 
@@ -436,12 +487,13 @@ ProjectModel makeInitialProject()
                                false,
                                false,
                                "bus_config(\"WAVETABLE\", \"out 0\")\n"
-                               "freq = makeconnection(\"inlet\", 1, 165)\n"
+                               "freq = makeconnection(\"inlet\", 1, 220)\n"
                                "gain = makeconnection(\"inlet\", 2, 0.02)\n"
                                "pan = makeconnection(\"inlet\", 3, 0.55)\n"
                                "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
+                               "basefreq = freq * 0.5\n"
                                "wave = maketable(\"wave\", 4096, \"sine\")\n"
-                               "WAVETABLE(0, 3600, gain * stategain * 32767.0, freq, pan, wave)\n",
+                               "WAVETABLE(0, 3600, gain * stategain * 32767.0, basefreq, pan, wave)\n",
                                {} });
 
     project.states.push_back (std::move (chuck));
@@ -1441,8 +1493,9 @@ private:
             for (auto& track : state.tracks)
                 if (track.language != Language::chuck)
                 {
+                    const auto originalLanguage = track.language;
                     track.language = Language::chuck;
-                    track.programBody = defaultCodeForLanguage (Language::chuck);
+                    track.programBody = chuckFallbackCodeForLanguage (originalLanguage);
                     track.parameterBindings = EmbeddedChucKEngine::getDefaultParameterBindings();
                 }
 

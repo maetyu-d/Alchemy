@@ -1570,15 +1570,15 @@ stop();
         }
     }
 
-    juce::AudioBuffer<float> input (0, 1);
-    juce::AudioBuffer<float> output (1, 1);
+    juce::AudioBuffer<float> input (0, blockSize);
+    juce::AudioBuffer<float> output (1, blockSize);
     std::vector<int> commands;
     std::vector<int> framesByCommand;
     std::vector<std::array<float, ChucKScoreScript::argumentCount>> argsByCommand;
     std::vector<std::array<juce::String, 2>> textByCommand;
 
-    constexpr int maxFrames = 120000;
-    for (int frame = 0; frame < maxFrames; ++frame)
+    constexpr int maxBlocks = 1200;
+    for (int block = 0; block < maxBlocks; ++block)
     {
         output.clear();
         engine.process (input, output);
@@ -1598,7 +1598,9 @@ stop();
                                        engine.getGlobalStringValue ("weldScoreText1") });
             engine.setParameterValue (commandIndex, 0.0f);
 
-            engine.process (input, output);
+            juce::AudioBuffer<float> ackInput (0, 1);
+            juce::AudioBuffer<float> ackOutput (1, 1);
+            engine.process (ackInput, ackOutput);
             engine.pullParameterValuesFromGlobals();
 
             if (command == static_cast<int> (ChucKScoreScript::CommandId::scoreComplete))
@@ -1637,7 +1639,7 @@ stop();
         || ! valuesAreClose (argsByCommand[6][2], 0.7f)
         || textByCommand[9][0] != "base64:U2luT3NjIHMgPT4gZGFjOwo="
         || ! valuesAreClose (argsByCommand[10][2], 0.5f)
-        || framesByCommand[10] != 96019)
+        || framesByCommand[10] != 96000)
     {
         juce::Logger::writeToLog ("Score-script test failed: bridged arguments are wrong; phaseFrame="
                                   + juce::String (framesByCommand[10]));

@@ -319,6 +319,25 @@ bool EmbeddedPerformanceEngine::setPhaseRotationMap (const std::vector<PhaseRota
     return setPhaseRotationMapUnlocked (events);
 }
 
+bool EmbeddedPerformanceEngine::setStopBeat (double beat)
+{
+    const juce::ScopedLock lock (engineLock);
+
+    if (! std::isfinite (beat))
+    {
+        lastError = "Performance stop beat must be finite";
+        return false;
+    }
+
+    stopBeat = beat < 0.0 ? -1.0 : beat;
+
+    if (! stateRuntimes.empty() && ! rebuildTimelineUnlocked())
+        return false;
+
+    lastError.clear();
+    return true;
+}
+
 bool EmbeddedPerformanceEngine::setTempoMapUnlocked (std::vector<TempoEvent> events)
 {
     if (events.empty())
@@ -723,6 +742,10 @@ bool EmbeddedPerformanceEngine::rebuildTimelineUnlocked()
     for (const auto& runtime : stateRuntimes)
         sequenceEndFrame = juce::jmax (sequenceEndFrame, runtime.tailEndFrame);
 
+    if (stopBeat >= 0.0)
+        sequenceEndFrame = juce::jmin (sequenceEndFrame,
+                                       juce::jmax<int64_t> (1, beatToFrameUnlocked (stopBeat)));
+
     return sequenceEndFrame > 0;
 }
 
@@ -774,6 +797,9 @@ int64_t EmbeddedPerformanceEngine::nextBoundaryAfterUnlocked (int64_t frame) con
                     next = juce::jmin (next, eventFrame);
             }
     }
+
+    if (sequenceEndFrame > frame)
+        next = juce::jmin (next, sequenceEndFrame);
 
     return next == std::numeric_limits<int64_t>::max() ? frame + maxBlockSize : next;
 }

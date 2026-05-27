@@ -566,5 +566,68 @@ while (true)
         }
     }
 
+    {
+        const auto stopChucK = juce::String (R"chuck(
+SinOsc osc => Gain amp => dac;
+
+while (true)
+{
+    220.0 => osc.freq;
+    hostGain * hostStateGain => amp.gain;
+    1::samp => now;
+}
+)chuck");
+
+        EmbeddedPerformanceEngine stopEngine;
+        if (! stopEngine.prepare (48000.0, blockSize, 0, 2)
+            || ! stopEngine.setTempoMap ({ { 0.0, 60.0 } }))
+        {
+            std::cerr << "Stop-beat performance prepare failed: " << stopEngine.getLastError() << '\n';
+            return 28;
+        }
+
+        EmbeddedPerformanceEngine::State state;
+        state.name = "stopped";
+        state.durationBeats = 1.0;
+        state.tailBeats = 0.0;
+        state.tracks.push_back ({ "stop-a",
+                                  EmbeddedLanguageEngine::Language::chuck,
+                                  stopChucK,
+                                  EmbeddedChucKEngine::getDefaultParameterBindings(),
+                                  1.0f,
+                                  true,
+                                  60.0,
+                                  4,
+                                  4,
+                                  0.0,
+                                  {} });
+
+        if (! stopEngine.loadSequence ({ state })
+            || ! stopEngine.setStopBeat (0.010)
+            || ! stopEngine.start())
+        {
+            std::cerr << "Stop-beat performance setup failed: " << stopEngine.getLastError() << '\n';
+            return 29;
+        }
+
+        for (int block = 0; block < 8 && stopEngine.isPlaying(); ++block)
+        {
+            output.clear();
+            stopEngine.process (input, output);
+        }
+
+        if (stopEngine.isPlaying()
+            || stopEngine.getRenderedFrameCount() != 480
+            || stopEngine.getRenderExceptionCount() != 0)
+        {
+            std::cerr << "Stop beat was not sample exact: playing="
+                      << stopEngine.isPlaying()
+                      << " renderedFrames=" << stopEngine.getRenderedFrameCount()
+                      << " renderExceptions=" << stopEngine.getRenderExceptionCount()
+                      << " lastError=" << stopEngine.getLastError() << '\n';
+            return 30;
+        }
+    }
+
     return 0;
 }

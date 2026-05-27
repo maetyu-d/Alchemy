@@ -85,6 +85,7 @@ public:
     bool setTempoMap (const std::vector<TempoEvent>& events);
     bool setTimeSignatureMap (const std::vector<TimeSignatureEvent>& events);
     bool setPhaseRotationMap (const std::vector<PhaseRotationEvent>& events);
+    bool setStopBeat (double beat);
     double getTempoBpm() const noexcept { return tempoBpm.load (std::memory_order_acquire); }
 
     bool setStateParameterValue (int stateIndex, const juce::String& name, float value);
@@ -172,6 +173,7 @@ private:
     std::vector<TempoEvent> tempoMap { { 0.0, 120.0 } };
     std::vector<TimeSignatureEvent> timeSignatureMap { { 0.0, 4, 4 } };
     std::vector<PhaseRotationEvent> phaseRotationMap { { 0.0, 0.0 } };
+    double stopBeat = -1.0;
     std::vector<float*> scratchInputPointers;
     std::vector<float*> scratchOutputPointers;
     juce::AudioBuffer<float> scratchInput;

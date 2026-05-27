@@ -55,6 +55,7 @@ struct ProjectModel
     std::vector<EmbeddedPerformanceEngine::TempoEvent> tempoMap;
     std::vector<EmbeddedPerformanceEngine::TimeSignatureEvent> timeSignatureMap;
     std::vector<EmbeddedPerformanceEngine::PhaseRotationEvent> phaseRotationMap;
+    double scheduledStopBeat = -1.0;
     std::vector<StateModel> states;
 };
 
@@ -121,6 +122,9 @@ double totalDurationBeats (const ProjectModel& project) noexcept
 
     for (const auto& state : project.states)
         total += juce::jmax (0.0, state.durationBeats);
+
+    if (project.scheduledStopBeat >= 0.0)
+        return juce::jmin (total, project.scheduledStopBeat);
 
     return total;
 }
@@ -1443,6 +1447,7 @@ private:
         performance.setPhaseRotationMap (pendingProject.phaseRotationMap.empty()
                                             ? std::vector<EmbeddedPerformanceEngine::PhaseRotationEvent> { { 0.0, pendingProject.globalPhaseBeats } }
                                             : pendingProject.phaseRotationMap);
+        performance.setStopBeat (pendingProject.scheduledStopBeat);
 
         std::vector<EmbeddedPerformanceEngine::State> sequence;
         sequence.reserve (pendingProject.states.size());
@@ -1923,8 +1928,8 @@ private:
             }
         }
 
-        juce::AudioBuffer<float> input (0, 1);
-        juce::AudioBuffer<float> output (1, 1);
+        juce::AudioBuffer<float> input (0, scoreChucKBlockSize);
+        juce::AudioBuffer<float> output (1, scoreChucKBlockSize);
         constexpr int64_t maxScoreFrames = static_cast<int64_t> (scoreChucKSampleRate) * 60 * 30;
 
         while (captureEngine.isReady() && static_cast<int64_t> (captureEngine.getRenderedFrameCount()) < maxScoreFrames)
@@ -1949,7 +1954,9 @@ private:
             events.push_back (std::move (event));
             captureEngine.setParameterValue (commandIndex, 0.0f);
 
-            captureEngine.process (input, output);
+            juce::AudioBuffer<float> ackInput (0, 1);
+            juce::AudioBuffer<float> ackOutput (1, 1);
+            captureEngine.process (ackInput, ackOutput);
             captureEngine.pullParameterValuesFromGlobals();
 
             if (commandId == static_cast<int> (ScoreCommandId::scoreComplete))
@@ -1971,6 +1978,7 @@ private:
         project.tempoMap.clear();
         project.timeSignatureMap.clear();
         project.phaseRotationMap.clear();
+        project.scheduledStopBeat = -1.0;
 
         for (auto& state : project.states)
             for (auto& track : state.tracks)
@@ -2047,6 +2055,8 @@ private:
             }
             else if (event.command == ScoreCommandId::stop || event.command == ScoreCommandId::scoreComplete)
             {
+                if (event.command == ScoreCommandId::stop)
+                    project.scheduledStopBeat = beat;
                 break;
             }
             else if (! isAudioTimelineCommand (event.command))
@@ -2218,6 +2228,7 @@ private:
                 project.tempoMap.clear();
                 project.timeSignatureMap.clear();
                 project.phaseRotationMap.clear();
+                project.scheduledStopBeat = -1.0;
                 refreshStructure (0);
                 break;
 

@@ -24,6 +24,7 @@ global string weldScoreText1;
 120.0 => float weldLocalTempo;
 4.0 => float weldMeterNumerator;
 4.0 => float weldMeterDenominator;
+0.0 => float weldScoreBridgeWaitSamples;
 dur beat;
 dur bar;
 
@@ -43,11 +44,14 @@ fun void weldSend(float command, float a0, float a1, float a2, float a3, float a
     a3 => weldScoreArg3;
     a4 => weldScoreArg4;
     a5 => weldScoreArg5;
-    now / samp => weldScoreFrame;
+    Math.max(0.0, (now / samp) - weldScoreBridgeWaitSamples) => weldScoreFrame;
     command => weldScoreCommand;
 
     while (weldScoreCommand != 0.0)
+    {
         1::samp => now;
+        weldScoreBridgeWaitSamples + 1.0 => weldScoreBridgeWaitSamples;
+    }
 }
 
 class ScoreApi

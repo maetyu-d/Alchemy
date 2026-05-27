@@ -506,8 +506,10 @@ juce::String demoChucKLayerCode (double ratio, double gainCap, double motionDept
          << "    110.0 * Math.pow(2.0, semitone / 12.0) => float base;\n"
          << "    base * " << juce::String (ratio, 4) << " => a.freq;\n"
          << "    base * " << juce::String (ratio * 1.5, 4) << " => b.freq;\n"
+         << "    0.32 => float gate;\n"
+         << "    if ((beat + " << offsetBeats << ") % 4 == 0) 1.45 => gate;\n"
          << "    0.74 + (" << juce::String (motionDepth, 4) << " * Math.sin((hostBarPhase + " << juce::String (offsetBeats * 0.125, 4) << ") * 6.2831853)) => float motion;\n"
-         << "    Math.max(0.0, Math.min(hostGain, " << juce::String (gainCap, 4) << ")) * hostStateGain * hostTrackGain * motion => mix.gain;\n"
+         << "    Math.max(0.0, Math.min(hostGain, " << juce::String (gainCap, 4) << ")) * hostStateGain * hostTrackGain * motion * gate => mix.gain;\n"
          << "    1::samp => now;\n"
          << "}\n";
     return code;
@@ -548,40 +550,40 @@ juce::String defaultChucKScoreScript()
            "meter(4, 4);\n"
            "state.add(\"Motif\", 16, 5);\n"
            "track.add(1, \"ChucK pulse canon\", \"chuck\");\n"
-           "track.gain(1, 1, 0.40);\n"
+           "track.gain(1, 1, 0.46);\n"
            "track.add(1, \"Upper response\", \"chuck\");\n"
-           "track.gain(1, 2, 0.26);\n"
+           "track.gain(1, 2, 0.42);\n"
            "track.add(1, \"Low clock\", \"chuck\");\n"
-           "track.gain(1, 3, 0.22);\n"
+           "track.gain(1, 3, 0.38);\n"
            "track.add(1, \"Inner fifth\", \"chuck\");\n"
-           "track.gain(1, 4, 0.24);\n"
+           "track.gain(1, 4, 0.40);\n"
            "state.add(\"Glass branch\", 12, 6);\n"
            "track.add(2, \"SC glass harmonics\", \"supercollider\");\n"
-           "track.gain(2, 1, 0.42);\n"
+           "track.gain(2, 1, 0.46);\n"
            "track.add(2, \"ChucK halo\", \"chuck\");\n"
-           "track.gain(2, 2, 0.24);\n"
+           "track.gain(2, 2, 0.40);\n"
            "track.add(2, \"ChucK slow answer\", \"chuck\");\n"
-           "track.gain(2, 3, 0.22);\n"
+           "track.gain(2, 3, 0.38);\n"
            "track.add(2, \"ChucK high pin\", \"chuck\");\n"
-           "track.gain(2, 4, 0.18);\n"
+           "track.gain(2, 4, 0.34);\n"
            "state.add(\"Low branch\", 20, 6);\n"
            "track.add(3, \"RTcmix low pedal\", \"rtcmix\");\n"
-           "track.gain(3, 1, 0.38);\n"
+           "track.gain(3, 1, 0.44);\n"
            "track.add(3, \"ChucK pedal octave\", \"chuck\");\n"
-           "track.gain(3, 2, 0.24);\n"
+           "track.gain(3, 2, 0.40);\n"
            "track.add(3, \"ChucK pulse shadow\", \"chuck\");\n"
-           "track.gain(3, 3, 0.22);\n"
+           "track.gain(3, 3, 0.38);\n"
            "track.add(3, \"ChucK low shimmer\", \"chuck\");\n"
-           "track.gain(3, 4, 0.20);\n"
+           "track.gain(3, 4, 0.36);\n"
            "state.add(\"Coda\", 10, 5);\n"
            "track.add(4, \"ChucK answer\", \"chuck\");\n"
-           "track.gain(4, 1, 0.34);\n"
+           "track.gain(4, 1, 0.42);\n"
            "track.add(4, \"ChucK coda glow\", \"chuck\");\n"
-           "track.gain(4, 2, 0.24);\n"
+           "track.gain(4, 2, 0.40);\n"
            "track.add(4, \"ChucK final fifth\", \"chuck\");\n"
-           "track.gain(4, 3, 0.22);\n"
+           "track.gain(4, 3, 0.38);\n"
            "track.add(4, \"ChucK floor\", \"chuck\");\n"
-           "track.gain(4, 4, 0.18);\n"
+           "track.gain(4, 4, 0.34);\n"
            "state.connect(1, 2, 70);\n"
            "state.connect(1, 3, 30);\n"
            "state.connect(2, 3, 50);\n"
@@ -774,17 +776,17 @@ TrackModel makeTrack (juce::String name, Language language)
         if (track.name.containsIgnoreCase ("answer"))
             track.code = demoChucKCodaCode();
         else if (track.name.containsIgnoreCase ("upper"))
-            track.code = demoChucKLayerCode (3.0, 0.032, 0.16, 1);
+            track.code = demoChucKLayerCode (3.0, 0.046, 0.16, 1);
         else if (track.name.containsIgnoreCase ("low clock") || track.name.containsIgnoreCase ("floor") || track.name.containsIgnoreCase ("pedal"))
-            track.code = demoChucKLayerCode (0.5, 0.036, 0.09, 4);
+            track.code = demoChucKLayerCode (0.5, 0.050, 0.09, 4);
         else if (track.name.containsIgnoreCase ("fifth"))
-            track.code = demoChucKLayerCode (1.5, 0.030, 0.12, 2);
+            track.code = demoChucKLayerCode (1.5, 0.044, 0.12, 2);
         else if (track.name.containsIgnoreCase ("halo") || track.name.containsIgnoreCase ("glow"))
-            track.code = demoChucKLayerCode (2.0, 0.028, 0.18, 0);
+            track.code = demoChucKLayerCode (2.0, 0.044, 0.18, 0);
         else if (track.name.containsIgnoreCase ("high"))
-            track.code = demoChucKLayerCode (4.0, 0.022, 0.08, 5);
+            track.code = demoChucKLayerCode (4.0, 0.036, 0.08, 5);
         else if (track.name.containsIgnoreCase ("shadow") || track.name.containsIgnoreCase ("shimmer") || track.name.containsIgnoreCase ("slow"))
-            track.code = demoChucKLayerCode (1.0, 0.026, 0.12, 3);
+            track.code = demoChucKLayerCode (1.0, 0.042, 0.12, 3);
         else
             track.code = demoChucKMotifCode();
     }
@@ -827,14 +829,14 @@ ProjectModel makeInitialProject()
                               4,
                               4,
                               0.0,
-                              0.40f,
+                              0.46f,
                               false,
                               false,
                               demoChucKMotifCode(),
                               {} });
-    chuck.tracks.push_back ({ "Upper response", Language::chuck, true, 120.0, 4, 4, 0.0, 0.26f, false, false, demoChucKLayerCode (3.0, 0.032, 0.16, 1), {} });
-    chuck.tracks.push_back ({ "Low clock", Language::chuck, true, 120.0, 4, 4, 0.0, 0.22f, false, false, demoChucKLayerCode (0.5, 0.038, 0.10, 4), {} });
-    chuck.tracks.push_back ({ "Inner fifth", Language::chuck, true, 120.0, 4, 4, 0.0, 0.24f, false, false, demoChucKLayerCode (1.5, 0.030, 0.12, 2), {} });
+    chuck.tracks.push_back ({ "Upper response", Language::chuck, true, 120.0, 4, 4, 0.0, 0.42f, false, false, demoChucKLayerCode (3.0, 0.046, 0.16, 1), {} });
+    chuck.tracks.push_back ({ "Low clock", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (0.5, 0.052, 0.10, 4), {} });
+    chuck.tracks.push_back ({ "Inner fifth", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (1.5, 0.044, 0.12, 2), {} });
 
     StateModel sc;
     sc.name = "Glass branch";
@@ -849,14 +851,14 @@ ProjectModel makeInitialProject()
                            4,
                            4,
                            0.0,
-                           0.42f,
+                           0.46f,
                            false,
                            false,
                            demoSuperColliderHarmonicCode(),
                            {} });
-    sc.tracks.push_back ({ "ChucK halo", Language::chuck, true, 120.0, 4, 4, 0.0, 0.24f, false, false, demoChucKLayerCode (2.0, 0.028, 0.18, 0), {} });
-    sc.tracks.push_back ({ "ChucK slow answer", Language::chuck, true, 120.0, 4, 4, 0.0, 0.22f, false, false, demoChucKLayerCode (1.0, 0.030, 0.10, 3), {} });
-    sc.tracks.push_back ({ "ChucK high pin", Language::chuck, true, 120.0, 4, 4, 0.0, 0.18f, false, false, demoChucKLayerCode (4.0, 0.022, 0.08, 5), {} });
+    sc.tracks.push_back ({ "ChucK halo", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (2.0, 0.044, 0.18, 0), {} });
+    sc.tracks.push_back ({ "ChucK slow answer", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (1.0, 0.046, 0.10, 3), {} });
+    sc.tracks.push_back ({ "ChucK high pin", Language::chuck, true, 120.0, 4, 4, 0.0, 0.34f, false, false, demoChucKLayerCode (4.0, 0.036, 0.08, 5), {} });
 
     StateModel rtcmix;
     rtcmix.name = "Low branch";
@@ -871,14 +873,14 @@ ProjectModel makeInitialProject()
                                4,
                                4,
                                0.0,
-                               0.38f,
+                               0.44f,
                                false,
                                false,
                                demoRTcmixBassCode(),
                                {} });
-    rtcmix.tracks.push_back ({ "ChucK pedal octave", Language::chuck, true, 120.0, 4, 4, 0.0, 0.24f, false, false, demoChucKLayerCode (0.5, 0.036, 0.09, 0), {} });
-    rtcmix.tracks.push_back ({ "ChucK pulse shadow", Language::chuck, true, 120.0, 4, 4, 0.0, 0.22f, false, false, demoChucKLayerCode (1.0, 0.026, 0.12, 2), {} });
-    rtcmix.tracks.push_back ({ "ChucK low shimmer", Language::chuck, true, 120.0, 4, 4, 0.0, 0.20f, false, false, demoChucKLayerCode (1.5, 0.024, 0.14, 6), {} });
+    rtcmix.tracks.push_back ({ "ChucK pedal octave", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (0.5, 0.050, 0.09, 0), {} });
+    rtcmix.tracks.push_back ({ "ChucK pulse shadow", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (1.0, 0.042, 0.12, 2), {} });
+    rtcmix.tracks.push_back ({ "ChucK low shimmer", Language::chuck, true, 120.0, 4, 4, 0.0, 0.36f, false, false, demoChucKLayerCode (1.5, 0.040, 0.14, 6), {} });
 
     StateModel coda;
     coda.name = "Coda";
@@ -893,14 +895,14 @@ ProjectModel makeInitialProject()
                              4,
                              4,
                              0.0,
-                             0.34f,
+                             0.42f,
                              false,
                              false,
                              demoChucKCodaCode(),
                              {} });
-    coda.tracks.push_back ({ "ChucK coda glow", Language::chuck, true, 120.0, 4, 4, 0.0, 0.24f, false, false, demoChucKLayerCode (2.0, 0.026, 0.12, 1), {} });
-    coda.tracks.push_back ({ "ChucK final fifth", Language::chuck, true, 120.0, 4, 4, 0.0, 0.22f, false, false, demoChucKLayerCode (1.5, 0.024, 0.10, 3), {} });
-    coda.tracks.push_back ({ "ChucK floor", Language::chuck, true, 120.0, 4, 4, 0.0, 0.18f, false, false, demoChucKLayerCode (0.5, 0.030, 0.08, 5), {} });
+    coda.tracks.push_back ({ "ChucK coda glow", Language::chuck, true, 120.0, 4, 4, 0.0, 0.40f, false, false, demoChucKLayerCode (2.0, 0.042, 0.12, 1), {} });
+    coda.tracks.push_back ({ "ChucK final fifth", Language::chuck, true, 120.0, 4, 4, 0.0, 0.38f, false, false, demoChucKLayerCode (1.5, 0.040, 0.10, 3), {} });
+    coda.tracks.push_back ({ "ChucK floor", Language::chuck, true, 120.0, 4, 4, 0.0, 0.34f, false, false, demoChucKLayerCode (0.5, 0.044, 0.08, 5), {} });
 
     project.states.push_back (std::move (chuck));
     project.states.push_back (std::move (sc));

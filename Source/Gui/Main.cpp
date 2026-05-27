@@ -1533,8 +1533,12 @@ class ArrangementComponent final : public juce::Component
 {
 public:
     explicit ArrangementComponent (ProjectModel& projectToUse)
-        : project (projectToUse)
+        : project (projectToUse),
+          trackLanes (projectToUse)
     {
+        addAndMakeVisible (trackViewport);
+        trackViewport.setViewedComponent (&trackLanes, false);
+        trackViewport.setScrollBarsShown (true, false);
     }
 
     void setTransport (bool countingInToUse, bool playingToUse, double countInBeatToUse, double beatToUse)
@@ -1543,7 +1547,20 @@ public:
         playing = playingToUse;
         countInBeat = countInBeatToUse;
         currentBeat = beatToUse;
+        trackLanes.setTransport (playing, currentBeat);
         repaint();
+    }
+
+    void refresh()
+    {
+        updateTrackLaneBounds();
+        trackLanes.repaint();
+        repaint();
+    }
+
+    void resized() override
+    {
+        updateTrackLaneBounds();
     }
 
     void paint (juce::Graphics& g) override
@@ -1589,10 +1606,137 @@ public:
         }
 
         area.removeFromTop (14);
-        drawTrackLanes (g, area);
     }
 
 private:
+    class TrackLanesComponent final : public juce::Component
+    {
+    public:
+        explicit TrackLanesComponent (ProjectModel& projectToUse)
+            : project (projectToUse)
+        {
+        }
+
+        void setTransport (bool playingToUse, double beatToUse)
+        {
+            playing = playingToUse;
+            currentBeat = beatToUse;
+            repaint();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.fillAll (juce::Colour (0xff101211));
+            drawTrackLanes (g, getLocalBounds());
+        }
+
+        static int laneCountFor (const ProjectModel& project)
+        {
+            const auto order = playableArrangementOrder (project);
+            auto laneCount = 0;
+            for (const auto stateIndex : order)
+                if (stateIndex >= 0 && stateIndex < static_cast<int> (project.states.size()))
+                    laneCount += static_cast<int> (project.states[static_cast<size_t> (stateIndex)].tracks.size());
+
+            return laneCount;
+        }
+
+    private:
+        static int beatToX (juce::Rectangle<int> area, double beat, double totalBeats)
+        {
+            return area.getX() + juce::roundToInt (area.getWidth() * juce::jlimit (0.0, 1.0, beat / juce::jmax (1.0, totalBeats)));
+        }
+
+        void drawTrackLanes (juce::Graphics& g, juce::Rectangle<int> area)
+        {
+            const auto order = playableArrangementOrder (project);
+            const auto laneCount = juce::jmax (1, laneCountFor (project));
+            const auto laneHeight = juce::jmax (28, area.getHeight() / laneCount);
+            const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
+
+            auto stateStartBeat = 0.0;
+            for (const auto stateIndex : order)
+            {
+                if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+                    continue;
+
+                const auto& state = project.states[static_cast<size_t> (stateIndex)];
+                for (const auto& track : state.tracks)
+                {
+                    auto lane = area.removeFromTop (laneHeight).reduced (0, 3);
+                    const auto laneBounds = lane;
+                    g.setColour (juce::Colour (0xff1b201f));
+                    g.fillRect (laneBounds);
+
+                    const auto stateStartX = beatToX (laneBounds, stateStartBeat, totalBeats);
+                    const auto stateEndX = beatToX (laneBounds, stateStartBeat + state.durationBeats, totalBeats);
+                    const auto tailEndX = beatToX (laneBounds, stateStartBeat + state.durationBeats + state.tailBeats, totalBeats);
+                    auto clip = juce::Rectangle<int> (stateStartX,
+                                                      laneBounds.getY(),
+                                                      juce::jmax (1, stateEndX - stateStartX),
+                                                      laneBounds.getHeight());
+                    auto tail = juce::Rectangle<int> (stateEndX,
+                                                      laneBounds.getY(),
+                                                      juce::jmax (0, tailEndX - stateEndX),
+                                                      laneBounds.getHeight());
+
+                    const auto colour = languageColour (track.language);
+                    if (! tail.isEmpty())
+                    {
+                        g.setColour (colour.withAlpha (0.26f));
+                        g.fillRect (tail);
+                    }
+
+                    g.setColour (colour.withAlpha (0.82f));
+                    g.fillRect (clip);
+                    g.setColour (colour.withAlpha (0.95f));
+                    g.drawRect (clip);
+                    if (! tail.isEmpty())
+                        g.drawRect (tail);
+
+                    g.setColour (juce::Colour (0xff101211));
+                    g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+                    g.drawText (state.name + " / " + track.name + " / " + languageName (track.language),
+                                clip.reduced (8, 0).withRight (juce::jmax (clip.getRight(), laneBounds.getX() + 180)),
+                                juce::Justification::centredLeft,
+                                true);
+                }
+
+                stateStartBeat += state.durationBeats;
+            }
+
+            if (playing)
+            {
+                const auto playheadX = beatToX (getLocalBounds(), currentBeat, totalBeats);
+                g.setColour (juce::Colour (0xfffff0a8));
+                g.drawLine (static_cast<float> (playheadX),
+                            static_cast<float> (getLocalBounds().getY()),
+                            static_cast<float> (playheadX),
+                            static_cast<float> (getLocalBounds().getBottom()),
+                            1.5f);
+            }
+        }
+
+        ProjectModel& project;
+        bool playing = false;
+        double currentBeat = 0.0;
+    };
+
+    void updateTrackLaneBounds()
+    {
+        auto area = getLocalBounds().reduced (18);
+        area.removeFromTop (30);
+        area.removeFromTop (juce::jmax (80, area.getHeight() / 4));
+        area.removeFromTop (14);
+
+        trackViewport.setBounds (area);
+
+        const auto laneHeight = 42;
+        const auto contentHeight = juce::jmax (area.getHeight(),
+                                               TrackLanesComponent::laneCountFor (project) * laneHeight);
+        trackLanes.setBounds (0, 0, juce::jmax (1, area.getWidth() - 14), contentHeight);
+    }
+
     static void drawPlayhead (juce::Graphics& g, juce::Rectangle<int> timeline, double normalised)
     {
         const auto x = timeline.getX() + juce::roundToInt (timeline.getWidth() * juce::jlimit (0.0, 1.0, normalised));
@@ -1605,70 +1749,9 @@ private:
         return area.getX() + juce::roundToInt (area.getWidth() * juce::jlimit (0.0, 1.0, beat / juce::jmax (1.0, totalBeats)));
     }
 
-    void drawTrackLanes (juce::Graphics& g, juce::Rectangle<int> area)
-    {
-        const auto order = playableArrangementOrder (project);
-        int laneCount = 0;
-        for (const auto stateIndex : order)
-            if (stateIndex >= 0 && stateIndex < static_cast<int> (project.states.size()))
-                laneCount += static_cast<int> (project.states[static_cast<size_t> (stateIndex)].tracks.size());
-
-        const auto laneHeight = juce::jmax (28, area.getHeight() / juce::jmax (1, laneCount));
-        const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
-
-        auto stateStartBeat = 0.0;
-        for (const auto stateIndex : order)
-        {
-            if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
-                continue;
-
-            const auto& state = project.states[static_cast<size_t> (stateIndex)];
-            for (const auto& track : state.tracks)
-            {
-                auto lane = area.removeFromTop (laneHeight).reduced (0, 3);
-                const auto laneBounds = lane;
-                g.setColour (juce::Colour (0xff1b201f));
-                g.fillRect (laneBounds);
-
-                const auto stateStartX = beatToX (laneBounds, stateStartBeat, totalBeats);
-                const auto stateEndX = beatToX (laneBounds, stateStartBeat + state.durationBeats, totalBeats);
-                const auto tailEndX = beatToX (laneBounds, stateStartBeat + state.durationBeats + state.tailBeats, totalBeats);
-                auto clip = juce::Rectangle<int> (stateStartX,
-                                                  laneBounds.getY(),
-                                                  juce::jmax (1, stateEndX - stateStartX),
-                                                  laneBounds.getHeight());
-                auto tail = juce::Rectangle<int> (stateEndX,
-                                                  laneBounds.getY(),
-                                                  juce::jmax (0, tailEndX - stateEndX),
-                                                  laneBounds.getHeight());
-
-                const auto colour = languageColour (track.language);
-                if (! tail.isEmpty())
-                {
-                    g.setColour (colour.withAlpha (0.26f));
-                    g.fillRect (tail);
-                }
-
-                g.setColour (colour.withAlpha (0.82f));
-                g.fillRect (clip);
-                g.setColour (colour.withAlpha (0.95f));
-                g.drawRect (clip);
-                if (! tail.isEmpty())
-                    g.drawRect (tail);
-
-                g.setColour (juce::Colour (0xff101211));
-                g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
-                g.drawText (state.name + " / " + track.name + " / " + languageName (track.language),
-                            clip.reduced (8, 0).withRight (juce::jmax (clip.getRight(), laneBounds.getX() + 180)),
-                            juce::Justification::centredLeft,
-                            true);
-            }
-
-            stateStartBeat += state.durationBeats;
-        }
-    }
-
     ProjectModel& project;
+    juce::Viewport trackViewport;
+    TrackLanesComponent trackLanes;
     bool countingIn = false;
     bool playing = false;
     double countInBeat = 0.0;
@@ -2448,7 +2531,7 @@ private:
 
         mixer.refresh();
         score.repaint();
-        arrangement.repaint();
+        arrangement.refresh();
         audio.loadProject (project);
         layoutBottomView();
         updateTransportViews();
@@ -2461,7 +2544,7 @@ private:
 
         static_cast<void> (audio.updateTrackGains (project));
         score.repaint();
-        arrangement.repaint();
+        arrangement.refresh();
         updateTransportViews();
     }
 
@@ -2469,7 +2552,7 @@ private:
     {
         mixer.refresh();
         score.repaint();
-        arrangement.repaint();
+        arrangement.refresh();
         audio.loadProject (project);
         updateTransportViews();
     }
@@ -2777,7 +2860,7 @@ private:
         mixer.refresh();
         score.syncControlsFromProject();
         score.repaint();
-        arrangement.repaint();
+        arrangement.refresh();
         startPlayback();
     }
 
@@ -2923,7 +3006,7 @@ private:
             case ScoreCommandId::scoreComplete:
                 arrangeStatesAsFiniteStateMachine (project);
                 score.repaint();
-                arrangement.repaint();
+                arrangement.refresh();
                 chuckScoreRunning = false;
                 break;
 
@@ -3022,7 +3105,7 @@ private:
                     project.arrangementOrder = defaultArrangementOrder (project);
                     arrangeStatesAsFiniteStateMachine (project);
                     score.repaint();
-                    arrangement.repaint();
+                    arrangement.refresh();
                 }
                 break;
             }
@@ -3044,7 +3127,7 @@ private:
                     project.arrangementOrder = defaultArrangementOrder (project);
                     arrangeStatesAsFiniteStateMachine (project);
                     score.repaint();
-                    arrangement.repaint();
+                    arrangement.refresh();
                 }
                 break;
             }
@@ -3058,7 +3141,7 @@ private:
                     project.arrangementOrder = defaultArrangementOrder (project);
                     arrangeStatesAsFiniteStateMachine (project);
                     score.repaint();
-                    arrangement.repaint();
+                    arrangement.refresh();
                 }
                 break;
             }

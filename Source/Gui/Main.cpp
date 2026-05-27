@@ -277,6 +277,121 @@ std::vector<int> resolveProbabilisticArrangement (const ProjectModel& project)
     return order;
 }
 
+bool projectHasExplicitTransitions (const ProjectModel& project)
+{
+    return std::any_of (project.states.begin(),
+                        project.states.end(),
+                        [] (const StateModel& state)
+                        {
+                            return ! state.transitions.empty();
+                        });
+}
+
+void arrangeStatesAsFiniteStateMachine (ProjectModel& project)
+{
+    if (project.states.empty())
+        return;
+
+    if (! projectHasExplicitTransitions (project))
+    {
+        for (int i = 0; i < static_cast<int> (project.states.size()); ++i)
+        {
+            auto& state = project.states[static_cast<size_t> (i)];
+            state.canvasX = 70 + i * 260;
+            state.canvasY = 160;
+        }
+
+        return;
+    }
+
+    const auto stateCount = static_cast<int> (project.states.size());
+    std::vector<int> depth (project.states.size(), -1);
+    std::vector<int> queue;
+    queue.reserve (project.states.size());
+    depth[0] = 0;
+    queue.push_back (0);
+
+    for (size_t read = 0; read < queue.size(); ++read)
+    {
+        const auto from = queue[read];
+        for (const auto& transition : project.states[static_cast<size_t> (from)].transitions)
+        {
+            const auto to = transition.targetStateIndex;
+            if (to < 0 || to >= stateCount || depth[static_cast<size_t> (to)] >= 0)
+                continue;
+
+            depth[static_cast<size_t> (to)] = depth[static_cast<size_t> (from)] + 1;
+            queue.push_back (to);
+        }
+    }
+
+    auto maxDepth = 0;
+    for (int i = 0; i < stateCount; ++i)
+    {
+        if (depth[static_cast<size_t> (i)] < 0)
+            depth[static_cast<size_t> (i)] = ++maxDepth;
+        else
+            maxDepth = juce::jmax (maxDepth, depth[static_cast<size_t> (i)]);
+    }
+
+    std::vector<std::vector<int>> columns (static_cast<size_t> (maxDepth + 1));
+    for (int i = 0; i < stateCount; ++i)
+        columns[static_cast<size_t> (depth[static_cast<size_t> (i)])].push_back (i);
+
+    for (int columnIndex = 0; columnIndex < static_cast<int> (columns.size()); ++columnIndex)
+    {
+        const auto& column = columns[static_cast<size_t> (columnIndex)];
+        const auto count = static_cast<int> (column.size());
+        for (int slot = 0; slot < count; ++slot)
+        {
+            auto& state = project.states[static_cast<size_t> (column[static_cast<size_t> (slot)])];
+            state.canvasX = 70 + columnIndex * 260;
+            state.canvasY = count <= 1 ? 160 : 60 + slot * 170;
+        }
+    }
+}
+
+std::vector<juce::Rectangle<int>> stateNodeBounds (const ProjectModel& project,
+                                                   juce::Rectangle<int> patchArea,
+                                                   int nodeWidth,
+                                                   int nodeHeight)
+{
+    std::vector<juce::Rectangle<int>> nodes;
+    nodes.reserve (project.states.size());
+
+    if (project.states.empty())
+        return nodes;
+
+    auto minX = project.states.front().canvasX;
+    auto maxX = project.states.front().canvasX;
+    auto minY = project.states.front().canvasY;
+    auto maxY = project.states.front().canvasY;
+
+    for (const auto& state : project.states)
+    {
+        minX = juce::jmin (minX, state.canvasX);
+        maxX = juce::jmax (maxX, state.canvasX);
+        minY = juce::jmin (minY, state.canvasY);
+        maxY = juce::jmax (maxY, state.canvasY);
+    }
+
+    const auto usableWidth = juce::jmax (1, patchArea.getWidth() - nodeWidth);
+    const auto usableHeight = juce::jmax (1, patchArea.getHeight() - nodeHeight);
+    const auto spanX = juce::jmax (1, maxX - minX);
+    const auto spanY = juce::jmax (1, maxY - minY);
+
+    for (const auto& state : project.states)
+    {
+        const auto normalisedX = project.states.size() <= 1 ? 0.5 : static_cast<double> (state.canvasX - minX) / spanX;
+        const auto normalisedY = maxY == minY ? 0.5 : static_cast<double> (state.canvasY - minY) / spanY;
+        const auto x = patchArea.getX() + juce::roundToInt (usableWidth * normalisedX);
+        const auto y = patchArea.getY() + juce::roundToInt (usableHeight * normalisedY);
+        nodes.push_back ({ x, y, nodeWidth, nodeHeight });
+    }
+
+    return nodes;
+}
+
 int meterIdFor (int numerator, int denominator) noexcept
 {
     if (numerator == 3 && denominator == 4)
@@ -571,7 +686,7 @@ ProjectModel makeInitialProject()
     chuck.durationBeats = 16.0;
     chuck.tailBeats = 4.0;
     chuck.canvasX = 70;
-    chuck.canvasY = 40;
+    chuck.canvasY = 160;
     chuck.tracks.push_back ({ "ChucK lead",
                               Language::chuck,
                               true,
@@ -595,7 +710,7 @@ ProjectModel makeInitialProject()
     sc.durationBeats = 12.0;
     sc.tailBeats = 4.0;
     sc.canvasX = 330;
-    sc.canvasY = 88;
+    sc.canvasY = 60;
     sc.tracks.push_back ({ "SC harmonic",
                            Language::supercollider,
                            true,
@@ -619,8 +734,8 @@ ProjectModel makeInitialProject()
     rtcmix.name = "State 3";
     rtcmix.durationBeats = 20.0;
     rtcmix.tailBeats = 4.0;
-    rtcmix.canvasX = 590;
-    rtcmix.canvasY = 40;
+    rtcmix.canvasX = 330;
+    rtcmix.canvasY = 230;
     rtcmix.tracks.push_back ({ "RTcmix bass",
                                Language::rtcmix,
                                true,
@@ -645,8 +760,8 @@ ProjectModel makeInitialProject()
     coda.name = "State 4";
     coda.durationBeats = 10.0;
     coda.tailBeats = 4.0;
-    coda.canvasX = 850;
-    coda.canvasY = 88;
+    coda.canvasX = 590;
+    coda.canvasY = 160;
     coda.tracks.push_back ({ "ChucK coda",
                              Language::chuck,
                              true,
@@ -674,6 +789,7 @@ ProjectModel makeInitialProject()
     project.states[1].transitions.push_back ({ 2, 50.0 });
     project.states[1].transitions.push_back ({ 3, 50.0 });
     project.states[2].transitions.push_back ({ 3, 1.0 });
+    arrangeStatesAsFiniteStateMachine (project);
     project.arrangementOrder = defaultArrangementOrder (project);
     return project;
 }
@@ -852,21 +968,9 @@ public:
         patchArea.removeFromBottom (14);
         const auto totalBeats = juce::jmax (1.0, totalDurationBeats (project));
 
-        std::vector<juce::Rectangle<int>> nodes;
-        nodes.reserve (project.states.size());
-
         const auto nodeWidth = juce::jlimit (112, 188, patchArea.getWidth() / juce::jmax (1, static_cast<int> (project.states.size())) - 14);
         const auto nodeHeight = juce::jlimit (62, 92, patchArea.getHeight() - 20);
-        const auto usableWidth = juce::jmax (1, patchArea.getWidth() - nodeWidth);
-
-        for (size_t i = 0; i < project.states.size(); ++i)
-        {
-            const auto normalised = project.states.size() <= 1 ? 0.5 : static_cast<double> (i) / static_cast<double> (project.states.size() - 1);
-            const auto x = patchArea.getX() + juce::roundToInt (usableWidth * normalised);
-            const auto wave = std::sin (normalised * juce::MathConstants<double>::twoPi);
-            const auto y = patchArea.getCentreY() - nodeHeight / 2 + juce::roundToInt (wave * 15.0);
-            nodes.push_back ({ x, y, nodeWidth, nodeHeight });
-        }
+        const auto nodes = stateNodeBounds (project, patchArea, nodeWidth, nodeHeight);
 
         auto drewExplicitConnection = false;
         for (size_t i = 0; i < project.states.size(); ++i)
@@ -2137,6 +2241,7 @@ private:
             && project.states[static_cast<size_t> (newStateIndex - 1)].transitions.empty())
             project.states[static_cast<size_t> (newStateIndex - 1)].transitions.push_back ({ newStateIndex, 1.0 });
         project.states.push_back (std::move (state));
+        arrangeStatesAsFiniteStateMachine (project);
         project.arrangementOrder = defaultArrangementOrder (project);
         refreshStructure (static_cast<int> (project.states.size()) - 1);
         return true;
@@ -2174,6 +2279,7 @@ private:
         }
 
         project.arrangementOrder = defaultArrangementOrder (project);
+        arrangeStatesAsFiniteStateMachine (project);
         refreshStructure (juce::jlimit (0, static_cast<int> (project.states.size()) - 1, index));
         return true;
     }
@@ -2718,6 +2824,9 @@ private:
                 break;
 
             case ScoreCommandId::scoreComplete:
+                arrangeStatesAsFiniteStateMachine (project);
+                score.repaint();
+                arrangement.repaint();
                 chuckScoreRunning = false;
                 break;
 
@@ -2814,6 +2923,7 @@ private:
                         transitions.push_back ({ to, args[2] });
 
                     project.arrangementOrder = defaultArrangementOrder (project);
+                    arrangeStatesAsFiniteStateMachine (project);
                     score.repaint();
                     arrangement.repaint();
                 }
@@ -2835,6 +2945,7 @@ private:
                                                        }),
                                        transitions.end());
                     project.arrangementOrder = defaultArrangementOrder (project);
+                    arrangeStatesAsFiniteStateMachine (project);
                     score.repaint();
                     arrangement.repaint();
                 }
@@ -2848,6 +2959,7 @@ private:
                 {
                     project.states[static_cast<size_t> (index)].transitions.clear();
                     project.arrangementOrder = defaultArrangementOrder (project);
+                    arrangeStatesAsFiniteStateMachine (project);
                     score.repaint();
                     arrangement.repaint();
                 }

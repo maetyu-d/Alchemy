@@ -9,8 +9,8 @@ namespace
 constexpr float defaultTempoBpm = 120.0f;
 constexpr float maximumTempoBpm = 999.0f;
 constexpr float maximumBeatValue = 1000000.0f;
+constexpr float maximumTrackGain = 5.6234133f;
 constexpr float outputSafetyLimit = 0.98f;
-constexpr double stateFadeInSeconds = 0.010;
 
 bool hasBindingNamed (const std::vector<EmbeddedPerformanceEngine::ParameterBinding>& bindings,
                       const juce::String& name)
@@ -209,6 +209,7 @@ bool EmbeddedPerformanceEngine::start()
     }
 
     playheadFrame = 0;
+    resetMeterSlotsUnlocked();
     playing.store (true, std::memory_order_release);
     currentStateIndex.store (currentStateIndexForFrameUnlocked (playheadFrame), std::memory_order_release);
     activeStateCount.store (activeStateCountForFrameUnlocked (playheadFrame), std::memory_order_release);
@@ -222,6 +223,7 @@ void EmbeddedPerformanceEngine::stop() noexcept
     playing.store (false, std::memory_order_release);
     currentStateIndex.store (-1, std::memory_order_release);
     activeStateCount.store (0, std::memory_order_release);
+    resetMeterSlotsUnlocked();
 }
 
 void EmbeddedPerformanceEngine::resetToStart() noexcept
@@ -230,6 +232,7 @@ void EmbeddedPerformanceEngine::resetToStart() noexcept
     playheadFrame = 0;
     currentStateIndex.store (stateRuntimes.empty() ? -1 : 0, std::memory_order_release);
     activeStateCount.store (stateRuntimes.empty() ? 0 : activeStateCountForFrameUnlocked (0), std::memory_order_release);
+    resetMeterSlotsUnlocked();
 }
 
 void EmbeddedPerformanceEngine::process (const juce::AudioBuffer<float>& input, juce::AudioBuffer<float>& output)
@@ -239,6 +242,7 @@ void EmbeddedPerformanceEngine::process (const juce::AudioBuffer<float>& input, 
 
     if (! lock.isLocked() || ! playing.load (std::memory_order_acquire) || stateRuntimes.empty())
     {
+        decayMeterSlotsUnlocked();
         silentProcessCount.fetch_add (1, std::memory_order_relaxed);
         return;
     }
@@ -260,10 +264,21 @@ void EmbeddedPerformanceEngine::process (const juce::AudioBuffer<float>& input, 
 
     try
     {
+        decayMeterSlotsUnlocked();
+
         while (offset < frames && playing.load (std::memory_order_relaxed))
         {
             if (playheadFrame >= sequenceEndFrame)
             {
+                if (looping && sequenceEndFrame > 0)
+                {
+                    playheadFrame = 0;
+                    resetMeterSlotsUnlocked();
+                    currentStateIndex.store (currentStateIndexForFrameUnlocked (playheadFrame), std::memory_order_release);
+                    activeStateCount.store (activeStateCountForFrameUnlocked (playheadFrame), std::memory_order_release);
+                    continue;
+                }
+
                 playing.store (false, std::memory_order_release);
                 currentStateIndex.store (-1, std::memory_order_release);
                 activeStateCount.store (0, std::memory_order_release);
@@ -336,6 +351,12 @@ bool EmbeddedPerformanceEngine::setStopBeat (double beat)
 
     lastError.clear();
     return true;
+}
+
+void EmbeddedPerformanceEngine::setLooping (bool shouldLoop) noexcept
+{
+    const juce::ScopedLock lock (engineLock);
+    looping = shouldLoop;
 }
 
 bool EmbeddedPerformanceEngine::setTempoMapUnlocked (std::vector<TempoEvent> events)
@@ -539,7 +560,7 @@ bool EmbeddedPerformanceEngine::setTrackGain (int stateIndex, int trackIndex, fl
         return false;
     }
 
-    const auto limitedGain = juce::jlimit (0.0f, 4.0f, gain);
+    const auto limitedGain = juce::jlimit (0.0f, maximumTrackGain, gain);
         requestedState.tracks[static_cast<size_t> (trackIndex)].gain = limitedGain;
         requestedState.tracks[static_cast<size_t> (trackIndex)].gainEvents.clear();
 
@@ -583,6 +604,31 @@ juce::String EmbeddedPerformanceEngine::getLastError() const
     return lastError;
 }
 
+std::vector<EmbeddedPerformanceEngine::TrackMeterSnapshot> EmbeddedPerformanceEngine::getTrackMeterSnapshot() const
+{
+    std::vector<TrackMeterSnapshot> snapshot;
+    const auto count = juce::jlimit (0, maximumMeterSlots, activeMeterSlotCount.load (std::memory_order_acquire));
+    snapshot.reserve (static_cast<size_t> (count));
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& slot = meterSlots[static_cast<size_t> (i)];
+        const auto stateIndex = slot.stateIndex.load (std::memory_order_acquire);
+        const auto trackIndex = slot.trackIndex.load (std::memory_order_acquire);
+
+        if (stateIndex < 0 || trackIndex < 0)
+            continue;
+
+        snapshot.push_back ({ stateIndex,
+                              trackIndex,
+                              slot.peak.load (std::memory_order_relaxed),
+                              slot.rms.load (std::memory_order_relaxed),
+                              slot.clipHold.load (std::memory_order_relaxed) > 0 });
+    }
+
+    return snapshot;
+}
+
 double EmbeddedPerformanceEngine::getCurrentBeat() const
 {
     const juce::ScopedLock lock (engineLock);
@@ -621,7 +667,7 @@ EmbeddedPerformanceEngine::withPerformanceParameterBindings (std::vector<Paramet
     addBindingIfMissing (bindings, "hostBarBeat", 0.0f, 0.0f, maximumBeatValue);
     addBindingIfMissing (bindings, "hostBarPhase", 0.0f, 0.0f, 1.0f);
     addBindingIfMissing (bindings, "hostPhaseRotation", 0.0f, -maximumBeatValue, maximumBeatValue);
-    addBindingIfMissing (bindings, "hostTrackGain", 1.0f, 0.0f, 4.0f);
+    addBindingIfMissing (bindings, "hostTrackGain", 1.0f, 0.0f, maximumTrackGain);
     addBindingIfMissing (bindings, "hostTrackTempoBpm", defaultTempoBpm, 1.0f, maximumTempoBpm);
     addBindingIfMissing (bindings, "hostTrackTimeSigNumerator", 4.0f, 1.0f, 64.0f);
     addBindingIfMissing (bindings, "hostTrackTimeSigDenominator", 4.0f, 1.0f, 64.0f);
@@ -633,6 +679,7 @@ bool EmbeddedPerformanceEngine::prepareSequenceUnlocked()
 {
     stateRuntimes.clear();
     stateRuntimes.reserve (requestedStates.size());
+    auto nextMeterSlot = 0;
 
     for (const auto& state : requestedStates)
     {
@@ -647,7 +694,36 @@ bool EmbeddedPerformanceEngine::prepareSequenceUnlocked()
         }
 
         stateRuntimes.push_back (std::move (runtime));
+        auto& prepared = stateRuntimes.back();
+
+        for (auto& track : prepared.tracks)
+        {
+            if (nextMeterSlot >= maximumMeterSlots)
+                break;
+
+            const auto slotIndex = nextMeterSlot++;
+            track.meterSlotIndex = slotIndex;
+
+            auto& slot = meterSlots[static_cast<size_t> (slotIndex)];
+            slot.stateIndex.store (track.definition.meterStateIndex, std::memory_order_release);
+            slot.trackIndex.store (track.definition.meterTrackIndex, std::memory_order_release);
+            slot.peak.store (0.0f, std::memory_order_relaxed);
+            slot.rms.store (0.0f, std::memory_order_relaxed);
+            slot.clipHold.store (0, std::memory_order_relaxed);
+        }
     }
+
+    for (auto i = nextMeterSlot; i < maximumMeterSlots; ++i)
+    {
+        auto& slot = meterSlots[static_cast<size_t> (i)];
+        slot.stateIndex.store (-1, std::memory_order_release);
+        slot.trackIndex.store (-1, std::memory_order_release);
+        slot.peak.store (0.0f, std::memory_order_relaxed);
+        slot.rms.store (0.0f, std::memory_order_relaxed);
+        slot.clipHold.store (0, std::memory_order_relaxed);
+    }
+
+    activeMeterSlotCount.store (nextMeterSlot, std::memory_order_release);
 
     if (! rebuildTimelineUnlocked())
     {
@@ -764,6 +840,8 @@ void EmbeddedPerformanceEngine::releaseSequenceUnlocked() noexcept
     stateRuntimes.clear();
     playheadFrame = 0;
     sequenceEndFrame = 0;
+    resetMeterSlotsUnlocked();
+    activeMeterSlotCount.store (0, std::memory_order_release);
 }
 
 void EmbeddedPerformanceEngine::resetDiagnostics() noexcept
@@ -772,6 +850,77 @@ void EmbeddedPerformanceEngine::resetDiagnostics() noexcept
     silentProcessCount.store (0, std::memory_order_relaxed);
     oversizedBlockCount.store (0, std::memory_order_relaxed);
     renderExceptionCount.store (0, std::memory_order_relaxed);
+}
+
+void EmbeddedPerformanceEngine::resetMeterSlotsUnlocked() noexcept
+{
+    const auto count = juce::jlimit (0, maximumMeterSlots, activeMeterSlotCount.load (std::memory_order_acquire));
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto& slot = meterSlots[static_cast<size_t> (i)];
+        slot.peak.store (0.0f, std::memory_order_relaxed);
+        slot.rms.store (0.0f, std::memory_order_relaxed);
+        slot.clipHold.store (0, std::memory_order_relaxed);
+    }
+}
+
+void EmbeddedPerformanceEngine::decayMeterSlotsUnlocked() noexcept
+{
+    const auto count = juce::jlimit (0, maximumMeterSlots, activeMeterSlotCount.load (std::memory_order_acquire));
+
+    for (int i = 0; i < count; ++i)
+    {
+        auto& slot = meterSlots[static_cast<size_t> (i)];
+        slot.peak.store (slot.peak.load (std::memory_order_relaxed) * 0.78f, std::memory_order_relaxed);
+        slot.rms.store (slot.rms.load (std::memory_order_relaxed) * 0.88f, std::memory_order_relaxed);
+
+        const auto hold = slot.clipHold.load (std::memory_order_relaxed);
+        if (hold > 0)
+            slot.clipHold.store (hold - 1, std::memory_order_relaxed);
+    }
+}
+
+void EmbeddedPerformanceEngine::updateTrackMeter (int meterSlotIndex,
+                                                  const juce::AudioBuffer<float>& buffer,
+                                                  const StateRuntime& stateRuntime,
+                                                  const StateRuntime::TrackRuntime& trackRuntime,
+                                                  int frames,
+                                                  int64_t frameStart) noexcept
+{
+    if (meterSlotIndex < 0 || meterSlotIndex >= maximumMeterSlots || frames <= 0 || buffer.getNumChannels() <= 0)
+        return;
+
+    auto peak = 0.0f;
+    auto sumSquares = 0.0;
+    auto sampleCount = 0;
+
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+    {
+        const auto* source = buffer.getReadPointer (channel);
+
+        for (int sample = 0; sample < frames; ++sample)
+        {
+            const auto frame = frameStart + sample;
+            const auto gain = stateGainAtFrame (stateRuntime, frame) * trackGainAtFrameUnlocked (trackRuntime, frame);
+            const auto value = std::isfinite (source[sample]) ? source[sample] * gain : 0.0f;
+            const auto magnitude = std::abs (value);
+            peak = juce::jmax (peak, magnitude);
+            sumSquares += static_cast<double> (value) * static_cast<double> (value);
+            ++sampleCount;
+        }
+    }
+
+    if (sampleCount <= 0)
+        return;
+
+    const auto rms = static_cast<float> (std::sqrt (sumSquares / static_cast<double> (sampleCount)));
+    auto& slot = meterSlots[static_cast<size_t> (meterSlotIndex)];
+    slot.peak.store (juce::jmax (peak, slot.peak.load (std::memory_order_relaxed)), std::memory_order_relaxed);
+    slot.rms.store (juce::jmax (rms, slot.rms.load (std::memory_order_relaxed)), std::memory_order_relaxed);
+
+    if (peak >= 0.98f)
+        slot.clipHold.store (18, std::memory_order_relaxed);
 }
 
 bool EmbeddedPerformanceEngine::validatePreparedRenderStateFor (int frames) const noexcept
@@ -847,24 +996,7 @@ float EmbeddedPerformanceEngine::stateGainAtFrame (const StateRuntime& runtime, 
     if (frame < runtime.startFrame || frame >= runtime.tailEndFrame)
         return 0.0f;
 
-    auto gain = 1.0f;
-    const auto fadeInFrames = juce::jmin<int64_t> (runtime.durationFrames,
-                                                  juce::jmax<int64_t> (1, static_cast<int64_t> (std::llround (stateFadeInSeconds * currentSampleRate))));
-
-    if (frame < runtime.startFrame + fadeInFrames)
-        gain *= juce::jlimit (0.0f,
-                              1.0f,
-                              static_cast<float> (frame - runtime.startFrame) / static_cast<float> (fadeInFrames));
-
-    if (frame < runtime.endFrame)
-        return gain;
-
-    if (runtime.tailFrames <= 0)
-        return 0.0f;
-
-    const auto tailPosition = static_cast<double> (frame - runtime.endFrame)
-                              / static_cast<double> (runtime.tailFrames);
-    return gain * juce::jlimit (0.0f, 1.0f, static_cast<float> (1.0 - tailPosition));
+    return 1.0f;
 }
 
 float EmbeddedPerformanceEngine::stateBeatAtFrame (const StateRuntime& runtime, int64_t frame) const noexcept
@@ -961,14 +1093,14 @@ float EmbeddedPerformanceEngine::barPhaseAtBeatUnlocked (double beat) const noex
 
 float EmbeddedPerformanceEngine::trackGainAtBeatUnlocked (const StateRuntime::TrackRuntime& trackRuntime, double beat) const noexcept
 {
-    auto gain = juce::jlimit (0.0f, 4.0f, trackRuntime.definition.gain);
+    auto gain = juce::jlimit (0.0f, maximumTrackGain, trackRuntime.definition.gain);
 
     for (const auto& event : trackRuntime.definition.gainEvents)
     {
         if (event.beat > beat)
             break;
 
-        gain = juce::jlimit (0.0f, 4.0f, event.gain);
+        gain = juce::jlimit (0.0f, maximumTrackGain, event.gain);
     }
 
     return gain;
@@ -1150,6 +1282,7 @@ void EmbeddedPerformanceEngine::renderChunkUnlocked (const juce::AudioBuffer<flo
             juce::AudioBuffer<float> inputView (scratchInputPointers.data(), numInputChannels, frames);
             juce::AudioBuffer<float> outputView (scratchOutputPointers.data(), numOutputChannels, frames);
             track.engine->process (inputView, outputView);
+            updateTrackMeter (track.meterSlotIndex, scratchOutput, runtime, track, frames, frameStart);
 
             for (int channel = 0; channel < output.getNumChannels(); ++channel)
             {

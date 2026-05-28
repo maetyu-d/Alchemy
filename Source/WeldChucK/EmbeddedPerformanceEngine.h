@@ -2,6 +2,7 @@
 
 #include "EmbeddedLanguageEngine.h"
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -32,6 +33,17 @@ public:
         int timeSignatureDenominator = 4;
         double phaseRotationBeats = 0.0;
         std::vector<TrackGainEvent> gainEvents;
+        int meterStateIndex = -1;
+        int meterTrackIndex = -1;
+    };
+
+    struct TrackMeterSnapshot
+    {
+        int stateIndex = -1;
+        int trackIndex = -1;
+        float peak = 0.0f;
+        float rms = 0.0f;
+        bool clipping = false;
     };
 
     struct State
@@ -86,6 +98,7 @@ public:
     bool setTimeSignatureMap (const std::vector<TimeSignatureEvent>& events);
     bool setPhaseRotationMap (const std::vector<PhaseRotationEvent>& events);
     bool setStopBeat (double beat);
+    void setLooping (bool shouldLoop) noexcept;
     double getTempoBpm() const noexcept { return tempoBpm.load (std::memory_order_acquire); }
 
     bool setStateParameterValue (int stateIndex, const juce::String& name, float value);
@@ -103,6 +116,7 @@ public:
     uint64_t getOversizedBlockCount() const noexcept { return oversizedBlockCount.load (std::memory_order_relaxed); }
     uint64_t getRenderExceptionCount() const noexcept { return renderExceptionCount.load (std::memory_order_relaxed); }
     juce::String getLastError() const;
+    std::vector<TrackMeterSnapshot> getTrackMeterSnapshot() const;
 
     static double secondsToBeats (double seconds, double bpm) noexcept;
     static double beatsToSeconds (double beats, double bpm) noexcept;
@@ -115,6 +129,7 @@ private:
         {
             Track definition;
             std::unique_ptr<EmbeddedLanguageEngine> engine;
+            int meterSlotIndex = -1;
         };
 
         State definition;
@@ -138,6 +153,14 @@ private:
     bool setPhaseRotationMapUnlocked (std::vector<PhaseRotationEvent> events);
     void releaseSequenceUnlocked() noexcept;
     void resetDiagnostics() noexcept;
+    void resetMeterSlotsUnlocked() noexcept;
+    void decayMeterSlotsUnlocked() noexcept;
+    void updateTrackMeter (int meterSlotIndex,
+                           const juce::AudioBuffer<float>& buffer,
+                           const StateRuntime& stateRuntime,
+                           const StateRuntime::TrackRuntime& trackRuntime,
+                           int frames,
+                           int64_t frameStart) noexcept;
     bool validatePreparedRenderStateFor (int frames) const noexcept;
     int64_t nextBoundaryAfterUnlocked (int64_t frame) const noexcept;
     int currentStateIndexForFrameUnlocked (int64_t frame) const noexcept;
@@ -180,12 +203,26 @@ private:
     juce::AudioBuffer<float> scratchInput;
     juce::AudioBuffer<float> scratchOutput;
 
+    struct MeterSlot
+    {
+        std::atomic<int> stateIndex { -1 };
+        std::atomic<int> trackIndex { -1 };
+        std::atomic<float> peak { 0.0f };
+        std::atomic<float> rms { 0.0f };
+        std::atomic<int> clipHold { 0 };
+    };
+
+    static constexpr int maximumMeterSlots = 256;
+    std::array<MeterSlot, maximumMeterSlots> meterSlots {};
+    std::atomic<int> activeMeterSlotCount { 0 };
+
     double currentSampleRate = 0.0;
     int maxBlockSize = 0;
     int numInputChannels = 0;
     int numOutputChannels = 0;
     int64_t playheadFrame = 0;
     int64_t sequenceEndFrame = 0;
+    bool looping = false;
 
     std::atomic<double> tempoBpm { 120.0 };
     std::atomic<bool> ready { false };

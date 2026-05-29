@@ -34,6 +34,7 @@ fi
 rm -rf "$STAGE"
 mkdir -p "$FRAMEWORKS" "$RESOURCES"
 ditto "$APP" "$STAGE/Alchemy.app"
+rm -rf "$RESOURCES/Examples"
 ditto "$ROOT/Examples" "$RESOURCES/Examples"
 ditto "$ROOT/Packaging/DEPENDENCIES.md" "$RESOURCES/DEPENDENCIES.md"
 

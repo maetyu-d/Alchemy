@@ -419,15 +419,216 @@ juce::Colour languageColour (Language language)
 {
     switch (language)
     {
-        case Language::chuck: return juce::Colour (0xff69b1c9);
-        case Language::supercollider: return juce::Colour (0xffc98569);
-        case Language::rtcmix: return juce::Colour (0xff86bd72);
-        case Language::csound: return juce::Colour (0xffc1a85d);
-        case Language::faust: return juce::Colour (0xffb07ac7);
+        case Language::chuck: return juce::Colour (0xff00d7ff);
+        case Language::supercollider: return juce::Colour (0xffff6b4a);
+        case Language::rtcmix: return juce::Colour (0xff76ff4f);
+        case Language::csound: return juce::Colour (0xffffd400);
+        case Language::faust: return juce::Colour (0xffc95cff);
     }
 
     return juce::Colours::white;
 }
+
+juce::Colour rainbowColour (int index, float alpha = 1.0f)
+{
+    static constexpr std::array<uint32_t, 8> palette
+    {
+        0xffff3b30,
+        0xffff8f00,
+        0xffffd400,
+        0xff3cff6f,
+        0xff00d7ff,
+        0xff2979ff,
+        0xffc95cff,
+        0xffff4fd8
+    };
+
+    const auto wrapped = (index % static_cast<int> (palette.size()) + static_cast<int> (palette.size()))
+                       % static_cast<int> (palette.size());
+    return juce::Colour (palette[static_cast<size_t> (wrapped)]).withAlpha (alpha);
+}
+
+juce::Colour rainbowColourForText (const juce::String& text, float alpha = 1.0f)
+{
+    return rainbowColour (static_cast<int> (static_cast<unsigned int> (text.hashCode()) % 8u), alpha);
+}
+
+void fillRainbowGradient (juce::Graphics& g, juce::Rectangle<float> area, float alpha = 1.0f)
+{
+    if (area.isEmpty())
+        return;
+
+    juce::ColourGradient gradient (rainbowColour (0, alpha),
+                                   area.getX(),
+                                   area.getY(),
+                                   rainbowColour (7, alpha),
+                                   area.getRight(),
+                                   area.getY(),
+                                   false);
+
+    for (int i = 1; i < 8; ++i)
+        gradient.addColour (static_cast<double> (i) / 7.0, rainbowColour (i, alpha));
+
+    g.setGradientFill (gradient);
+    g.fillRect (area);
+}
+
+void strokeRainbowGradient (juce::Graphics& g, juce::Rectangle<float> area, float thickness = 1.5f)
+{
+    if (area.isEmpty())
+        return;
+
+    juce::ColourGradient gradient (rainbowColour (0),
+                                   area.getX(),
+                                   area.getY(),
+                                   rainbowColour (7),
+                                   area.getRight(),
+                                   area.getY(),
+                                   false);
+
+    for (int i = 1; i < 8; ++i)
+        gradient.addColour (static_cast<double> (i) / 7.0, rainbowColour (i));
+
+    g.setGradientFill (gradient);
+    g.drawRect (area, thickness);
+}
+
+class RainbowLookAndFeel final : public juce::LookAndFeel_V4
+{
+public:
+    RainbowLookAndFeel()
+    {
+        setColour (juce::TextButton::buttonColourId, juce::Colour (0xff24313a));
+        setColour (juce::TextButton::buttonOnColourId, rainbowColour (2));
+        setColour (juce::TextButton::textColourOffId, juce::Colour (0xffffffff));
+        setColour (juce::TextButton::textColourOnId, juce::Colour (0xff090a0b));
+        setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff23313a));
+        setColour (juce::ComboBox::outlineColourId, rainbowColour (4, 0.9f));
+        setColour (juce::ComboBox::textColourId, juce::Colour (0xffffffff));
+        setColour (juce::Slider::thumbColourId, rainbowColour (4));
+        setColour (juce::Slider::trackColourId, rainbowColour (4, 0.8f));
+        setColour (juce::Slider::backgroundColourId, juce::Colour (0xff13232a));
+        setColour (juce::Label::textColourId, juce::Colour (0xfff8fffb));
+        setColour (juce::TabbedButtonBar::tabTextColourId, juce::Colour (0xffffffff));
+        setColour (juce::TabbedButtonBar::frontTextColourId, juce::Colour (0xff07090a));
+    }
+
+    void drawButtonBackground (juce::Graphics& g,
+                               juce::Button& button,
+                               const juce::Colour&,
+                               bool shouldDrawButtonAsHighlighted,
+                               bool shouldDrawButtonAsDown) override
+    {
+        auto bounds = button.getLocalBounds().toFloat().reduced (0.5f);
+        auto accent = button.getToggleState() ? rainbowColour (2) : rainbowColourForText (button.getButtonText());
+        if (! button.isEnabled())
+            accent = accent.withSaturation (0.35f).withBrightness (0.42f);
+
+        const auto top = accent.withMultipliedBrightness (shouldDrawButtonAsDown ? 0.7f : 0.95f).withAlpha (0.92f);
+        const auto bottom = rainbowColourForText (button.getButtonText() + "x").withAlpha (shouldDrawButtonAsHighlighted ? 0.95f : 0.72f);
+        juce::ColourGradient gradient (top, bounds.getX(), bounds.getY(), bottom, bounds.getRight(), bounds.getBottom(), false);
+
+        g.setGradientFill (gradient);
+        g.fillRoundedRectangle (bounds, 6.0f);
+        g.setColour (juce::Colours::white.withAlpha (shouldDrawButtonAsHighlighted ? 0.92f : 0.55f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 6.0f, 1.4f);
+    }
+
+    void drawToggleButton (juce::Graphics& g,
+                           juce::ToggleButton& button,
+                           bool shouldDrawButtonAsHighlighted,
+                           bool) override
+    {
+        auto bounds = button.getLocalBounds().toFloat();
+        auto box = bounds.removeFromLeft (juce::jmin (24.0f, bounds.getHeight())).reduced (3.0f);
+        const auto accent = rainbowColourForText (button.getButtonText());
+
+        g.setColour (juce::Colour (0xff10151a));
+        g.fillRoundedRectangle (box, 4.0f);
+        g.setColour (accent.withAlpha (shouldDrawButtonAsHighlighted ? 1.0f : 0.8f));
+        g.drawRoundedRectangle (box, 4.0f, 1.6f);
+
+        if (button.getToggleState())
+        {
+            g.setColour (accent);
+            g.fillRoundedRectangle (box.reduced (4.0f), 2.0f);
+        }
+
+        g.setColour (button.isEnabled() ? juce::Colour (0xffffffff) : juce::Colour (0xff8a9699));
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.drawFittedText (button.getButtonText(), bounds.toNearestInt().reduced (2, 0), juce::Justification::centredLeft, 1);
+    }
+
+    void drawComboBox (juce::Graphics& g,
+                       int width,
+                       int height,
+                       bool isButtonDown,
+                       int,
+                       int,
+                       int,
+                       int,
+                       juce::ComboBox& box) override
+    {
+        auto bounds = juce::Rectangle<float> (0.0f, 0.0f, static_cast<float> (width), static_cast<float> (height)).reduced (0.5f);
+        const auto accent = rainbowColourForText (box.getText().isEmpty() ? "combo" : box.getText());
+        juce::ColourGradient gradient (accent.withAlpha (isButtonDown ? 0.96f : 0.82f),
+                                       bounds.getX(),
+                                       bounds.getY(),
+                                       rainbowColourForText (box.getText() + "combo", 0.7f),
+                                       bounds.getRight(),
+                                       bounds.getBottom(),
+                                       false);
+        g.setGradientFill (gradient);
+        g.fillRoundedRectangle (bounds, 5.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.82f));
+        g.drawRoundedRectangle (bounds, 5.0f, 1.2f);
+
+        juce::Path arrow;
+        const auto cx = bounds.getRight() - 18.0f;
+        const auto cy = bounds.getCentreY();
+        arrow.startNewSubPath (cx - 6.0f, cy - 3.0f);
+        arrow.lineTo (cx, cy + 4.0f);
+        arrow.lineTo (cx + 6.0f, cy - 3.0f);
+        g.setColour (juce::Colours::white);
+        g.strokePath (arrow, juce::PathStrokeType (2.0f));
+    }
+
+    void drawLinearSlider (juce::Graphics& g,
+                           int x,
+                           int y,
+                           int width,
+                           int height,
+                           float sliderPos,
+                           float,
+                           float,
+                           const juce::Slider::SliderStyle style,
+                           juce::Slider& slider) override
+    {
+        auto bounds = juce::Rectangle<float> (static_cast<float> (x),
+                                             static_cast<float> (y),
+                                             static_cast<float> (width),
+                                             static_cast<float> (height));
+        const auto accent = rainbowColourForText (slider.getName().isEmpty() ? "slider" : slider.getName());
+
+        if (style == juce::Slider::LinearVertical)
+        {
+            auto track = bounds.withSizeKeepingCentre (6.0f, bounds.getHeight() - 10.0f);
+            fillRainbowGradient (g, track.expanded (4.0f, 0.0f), slider.isEnabled() ? 0.75f : 0.24f);
+            g.setColour (juce::Colour (0xff071014).withAlpha (0.72f));
+            g.fillRoundedRectangle (track, 3.0f);
+            g.setColour (juce::Colours::white.withAlpha (slider.isEnabled() ? 0.9f : 0.35f));
+            g.fillEllipse (track.getCentreX() - 7.0f, sliderPos - 7.0f, 14.0f, 14.0f);
+            return;
+        }
+
+        auto track = bounds.withHeight (6.0f).withCentre (bounds.getCentre());
+        fillRainbowGradient (g, track.expanded (0.0f, 2.0f), slider.isEnabled() ? 0.7f : 0.22f);
+        g.setColour (accent.withAlpha (slider.isEnabled() ? 1.0f : 0.35f));
+        g.fillEllipse (sliderPos - 8.0f, track.getCentreY() - 8.0f, 16.0f, 16.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.65f));
+        g.drawEllipse (sliderPos - 8.0f, track.getCentreY() - 8.0f, 16.0f, 16.0f, 1.2f);
+    }
+};
 
 class CodeEditorPane final : public juce::Component,
                              private juce::CodeDocument::Listener
@@ -440,15 +641,15 @@ public:
     {
         addAndMakeVisible (languageLabel);
         languageLabel.setJustificationType (juce::Justification::centredLeft);
-        languageLabel.setColour (juce::Label::textColourId, juce::Colour (0xffcfd8d3));
+        languageLabel.setColour (juce::Label::textColourId, juce::Colour (0xffffffff));
 
         addAndMakeVisible (search);
         search.setMultiLine (false);
         search.setReturnKeyStartsNewLine (false);
-        search.setTextToShowWhenEmpty ("Search", juce::Colour (0xff74817c));
-        search.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff111715));
-        search.setColour (juce::TextEditor::textColourId, juce::Colour (0xffe6eee9));
-        search.setColour (juce::TextEditor::outlineColourId, juce::Colour (0xff33403c));
+        search.setTextToShowWhenEmpty ("Search", rainbowColour (4, 0.62f));
+        search.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff101a23));
+        search.setColour (juce::TextEditor::textColourId, juce::Colour (0xffffffff));
+        search.setColour (juce::TextEditor::outlineColourId, rainbowColour (4, 0.8f));
         search.onTextChange = [this]
         {
             searchMatchIndex = 0;
@@ -465,7 +666,7 @@ public:
 
         addAndMakeVisible (statusLabel);
         statusLabel.setJustificationType (juce::Justification::centredRight);
-        statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8fa19a));
+        statusLabel.setColour (juce::Label::textColourId, rainbowColour (3, 0.86f));
 
         configureCodeEditorComponent();
         document.addListener (this);
@@ -522,11 +723,13 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff0b0f0e));
-        g.setColour (accent.withAlpha (0.8f));
-        g.fillRect (getLocalBounds().removeFromLeft (3));
-        g.setColour (juce::Colour (0xff33403c));
-        g.drawRect (getLocalBounds());
+        g.fillAll (juce::Colour (0xff08111b));
+        fillRainbowGradient (g, getLocalBounds().toFloat().withHeight (3.0f), 0.95f);
+        g.setColour (accent.withAlpha (0.92f));
+        g.fillRect (getLocalBounds().removeFromLeft (5));
+        g.setColour (accent.withAlpha (0.16f));
+        g.fillRect (getLocalBounds().reduced (5, 30));
+        strokeRainbowGradient (g, getLocalBounds().toFloat().reduced (0.5f), 1.1f);
     }
 
 private:
@@ -554,24 +757,24 @@ private:
         editor.setTabSize (4, false);
         editor.setScrollbarThickness (12);
         editor.setFont (juce::FontOptions (codeFontSize));
-        editor.setColour (juce::CodeEditorComponent::backgroundColourId, juce::Colour (0xff0b0f0e));
-        editor.setColour (juce::CodeEditorComponent::defaultTextColourId, juce::Colour (0xffe6eee9));
-        editor.setColour (juce::CodeEditorComponent::highlightColourId, juce::Colour (0xff49665f));
-        editor.setColour (juce::CodeEditorComponent::lineNumberBackgroundId, juce::Colour (0xff111715));
-        editor.setColour (juce::CodeEditorComponent::lineNumberTextId, juce::Colour (0xff718079));
+        editor.setColour (juce::CodeEditorComponent::backgroundColourId, juce::Colour (0xff08111b));
+        editor.setColour (juce::CodeEditorComponent::defaultTextColourId, juce::Colour (0xfff9fffd));
+        editor.setColour (juce::CodeEditorComponent::highlightColourId, juce::Colour (0xff244cff).withAlpha (0.55f));
+        editor.setColour (juce::CodeEditorComponent::lineNumberBackgroundId, juce::Colour (0xff171028));
+        editor.setColour (juce::CodeEditorComponent::lineNumberTextId, rainbowColour (4, 0.78f));
 
         juce::CodeEditorComponent::ColourScheme scheme;
-        scheme.set ("Error", juce::Colour (0xffff796e));
-        scheme.set ("Comment", juce::Colour (0xff72827c));
-        scheme.set ("Keyword", juce::Colour (0xff84c7b6));
-        scheme.set ("Operator", juce::Colour (0xffdce3e1));
-        scheme.set ("Identifier", juce::Colour (0xffe6eee9));
-        scheme.set ("Integer", juce::Colour (0xffffd37a));
-        scheme.set ("Float", juce::Colour (0xffffd37a));
-        scheme.set ("String", juce::Colour (0xffc1d98b));
-        scheme.set ("Bracket", juce::Colour (0xffdce3e1));
-        scheme.set ("Punctuation", juce::Colour (0xff9fb0aa));
-        scheme.set ("Preprocessor Text", juce::Colour (0xffc98569));
+        scheme.set ("Error", juce::Colour (0xffff3b30));
+        scheme.set ("Comment", juce::Colour (0xff8ef8ff));
+        scheme.set ("Keyword", juce::Colour (0xffff4fd8));
+        scheme.set ("Operator", juce::Colour (0xfffff4a3));
+        scheme.set ("Identifier", juce::Colour (0xffffffff));
+        scheme.set ("Integer", juce::Colour (0xffffd400));
+        scheme.set ("Float", juce::Colour (0xffffd400));
+        scheme.set ("String", juce::Colour (0xff76ff4f));
+        scheme.set ("Bracket", juce::Colour (0xff00d7ff));
+        scheme.set ("Punctuation", juce::Colour (0xffff8f00));
+        scheme.set ("Preprocessor Text", juce::Colour (0xffc95cff));
         editor.setColourScheme (scheme);
     }
 
@@ -598,7 +801,7 @@ private:
         const auto needle = search.getText();
         if (needle.isEmpty())
         {
-            statusLabel.setColour (juce::Label::textColourId, juce::Colour (0xff8fa19a));
+            statusLabel.setColour (juce::Label::textColourId, rainbowColour (3, 0.86f));
             refreshStatus();
             return;
         }
@@ -616,7 +819,7 @@ private:
         }
 
         searchMatchIndex = searchMatches.empty() ? 0 : juce::jlimit (0, static_cast<int> (searchMatches.size()) - 1, searchMatchIndex);
-        statusLabel.setColour (juce::Label::textColourId, searchMatches.empty() ? juce::Colour (0xffd58b73) : juce::Colour (0xfffff0a8));
+        statusLabel.setColour (juce::Label::textColourId, searchMatches.empty() ? rainbowColour (0) : rainbowColour (2));
         statusLabel.setText (searchMatches.empty()
                                 ? "No matches"
                                 : juce::String (searchMatchIndex + 1) + "/" + juce::String (searchMatches.size()),
@@ -1507,9 +1710,11 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.setColour (juce::Colour (0xffdce3e1));
+        g.setColour (juce::Colour (0xffffffff));
         g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
-        g.drawFittedText (text, getLocalBounds(), juce::Justification::centredLeft, 1);
+        auto area = getLocalBounds();
+        g.drawFittedText (text, area, juce::Justification::centredLeft, 1);
+        fillRainbowGradient (g, area.removeFromBottom (3).toFloat(), 0.95f);
     }
 
 private:
@@ -1699,7 +1904,9 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff151817));
+        g.fillAll (juce::Colour (0xff0d1224));
+        fillRainbowGradient (g, getLocalBounds().toFloat().withHeight (7.0f), 0.9f);
+        fillRainbowGradient (g, getLocalBounds().toFloat().withTrimmedTop (40.0f), 0.08f);
         auto area = getLocalBounds().reduced (18);
         area.removeFromTop (42);
         const auto editorWidth = scoreEditorWidthFor (area);
@@ -1779,9 +1986,9 @@ public:
             const auto x = timeline.getX() + juce::roundToInt (timeline.getWidth() * stateStart / totalBeats);
             auto block = juce::Rectangle<int> (x, timeline.getY(), stateWidth - 2, timeline.getHeight());
             const auto base = languageColour (state.tracks.empty() ? Language::chuck : state.tracks.front().language);
-            g.setColour (base.withAlpha (0.28f));
+            g.setColour (base.withAlpha (0.42f));
             g.fillRect (block);
-            g.setColour (base.withAlpha (0.8f));
+            g.setColour (base.withAlpha (1.0f));
             g.drawRect (block);
 
             if ((isCountingIn || isPlaying) && currentBeat >= stateStart && currentBeat <= stateStart + state.durationBeats)
@@ -1792,7 +1999,7 @@ public:
 
         if (isCountingIn)
         {
-            g.setColour (juce::Colour (0xffffd36e));
+            g.setColour (rainbowColour (2));
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
             g.drawText ("Count-in", area.reduced (14).removeFromBottom (26), juce::Justification::centredRight, true);
         }
@@ -2077,10 +2284,11 @@ private:
                                float zoom,
                                juce::Point<float> pan)
     {
-        g.setColour (juce::Colour (0xff202624));
+        g.setColour (juce::Colour (0xff101827));
         g.fillRect (area);
+        fillRainbowGradient (g, area.toFloat(), 0.08f);
 
-        g.setColour (juce::Colour (0xff2a312f));
+        g.setColour (rainbowColour (4, 0.18f));
         const auto spacing = juce::jlimit (8.0f, 72.0f, 24.0f * zoom);
         auto firstX = static_cast<float> (area.getX()) + std::fmod (pan.x, spacing);
         if (firstX > static_cast<float> (area.getX()))
@@ -2104,8 +2312,7 @@ private:
                         y,
                         1.0f);
 
-        g.setColour (juce::Colour (0xff3a4642));
-        g.drawRect (area);
+        strokeRainbowGradient (g, area.toFloat().reduced (0.5f), 1.2f);
     }
 
     static void drawPatchCord (juce::Graphics& g, int x1, int y1, int x2, int y2, double weight)
@@ -2120,7 +2327,14 @@ private:
                       static_cast<float> (x2),
                       static_cast<float> (y2));
 
-        g.setColour (juce::Colour (0xffcfd8d3).withAlpha (0.72f));
+        juce::ColourGradient gradient (rainbowColour (4, 0.9f),
+                                       static_cast<float> (x1),
+                                       static_cast<float> (y1),
+                                       rainbowColour (7, 0.9f),
+                                       static_cast<float> (x2),
+                                       static_cast<float> (y2),
+                                       false);
+        g.setGradientFill (gradient);
         g.strokePath (cord, juce::PathStrokeType (2.0f));
 
         if (std::abs (weight - 1.0) > 0.001)
@@ -2129,9 +2343,9 @@ private:
             const auto labelX = (x1 + x2) / 2 - 18;
             const auto labelY = (y1 + y2) / 2 - 22;
             auto labelBounds = juce::Rectangle<int> (labelX, labelY, 36, 18);
-            g.setColour (juce::Colour (0xff101211).withAlpha (0.92f));
+            g.setColour (juce::Colour (0xff080a12).withAlpha (0.92f));
             g.fillRect (labelBounds);
-            g.setColour (juce::Colour (0xfffff0a8));
+            g.setColour (rainbowColour (2));
             g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
             g.drawText (label, labelBounds, juce::Justification::centred, true);
         }
@@ -2148,21 +2362,24 @@ private:
         const auto language = state.tracks.empty() ? Language::chuck : state.tracks.front().language;
         const auto base = languageColour (language);
 
-        g.setColour (juce::Colour (0xff121615));
+        g.setColour (juce::Colour (0xff080c14));
         g.fillRect (node);
+        g.setColour (base.withAlpha (0.2f));
+        g.fillRect (node.reduced (2));
+        fillRainbowGradient (g, node.toFloat().removeFromTop (4.0f), 0.95f);
         if (active)
         {
-            g.setColour (base.withAlpha (0.18f));
+            g.setColour (base.withAlpha (0.34f));
             g.fillRect (node.reduced (3));
-            g.setColour (juce::Colour (0xfffff0a8).withAlpha (0.35f));
+            g.setColour (rainbowColour (2, 0.62f));
             g.drawRect (node.expanded (7), 2);
         }
 
-        g.setColour (base.withAlpha (0.92f));
+        g.setColour (base);
         g.drawRect (node, 2);
         if (selected)
         {
-            g.setColour (juce::Colour (0xfffff0a8));
+            g.setColour (rainbowColour (2));
             g.drawRect (node.expanded (3), 2);
         }
 
@@ -2170,7 +2387,7 @@ private:
         {
             auto progressBar = node.reduced (6).removeFromBottom (4);
             progressBar.setWidth (juce::roundToInt (progressBar.getWidth() * juce::jlimit (0.0, 1.0, progress)));
-            g.setColour (juce::Colour (0xfffff0a8));
+            g.setColour (rainbowColour (2));
             g.fillRect (progressBar);
         }
 
@@ -2180,13 +2397,13 @@ private:
         g.fillRect (outlet);
 
         auto text = node.reduced (10, 7);
-        g.setColour (juce::Colour (0xffeef4f1));
+        g.setColour (juce::Colour (0xffffffff));
         g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
         g.drawText (juce::String (index + 1) + "  " + state.name, text.removeFromTop (22), juce::Justification::centredLeft, true);
-        g.setColour (base.brighter (0.25f));
+        g.setColour (base.brighter (0.35f));
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (languageName (language), text.removeFromTop (18), juce::Justification::centredLeft, true);
-        g.setColour (juce::Colour (0xffcdd6d1));
+        g.setColour (juce::Colour (0xfff1fbff));
         g.drawText (juce::String (state.tracks.size()) + " tracks  "
                         + juce::String (state.durationBeats, 1) + " + "
                         + juce::String (state.tailBeats, 1),
@@ -2198,7 +2415,7 @@ private:
     static void drawProgressLine (juce::Graphics& g, juce::Rectangle<int> lane, double normalised)
     {
         const auto x = lane.getX() + juce::roundToInt (lane.getWidth() * juce::jlimit (0.0, 1.0, normalised));
-        g.setColour (juce::Colour (0xfffff0a8));
+        g.setColour (rainbowColour (2));
         g.drawLine (static_cast<float> (x), static_cast<float> (lane.getY()), static_cast<float> (x), static_cast<float> (lane.getBottom()), 2.0f);
     }
 
@@ -2352,11 +2569,13 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto area = getLocalBounds();
-        g.setColour (juce::Colour (0xff1d2220));
+        const auto colour = languageColour (track.language);
+        g.setColour (colour.withAlpha (0.1f));
         g.fillRect (area);
-        g.setColour (languageColour (track.language).withAlpha (0.8f));
-        g.fillRect (area.removeFromLeft (4));
-        g.setColour (juce::Colour (0xff38433f));
+        fillRainbowGradient (g, area.removeFromTop (3).toFloat(), 0.95f);
+        g.setColour (colour.withAlpha (0.9f));
+        g.fillRect (getLocalBounds().removeFromLeft (5));
+        g.setColour (colour.withAlpha (0.9f));
         g.drawRect (getLocalBounds());
     }
 
@@ -2476,7 +2695,8 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff101211));
+        g.fillAll (juce::Colour (0xff09111c));
+        fillRainbowGradient (g, getLocalBounds().toFloat().withHeight (4.0f), 0.9f);
     }
 
     void resized() override
@@ -2512,8 +2732,8 @@ private:
 
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colour (0xff101211));
-            g.setColour (isMouseOverOrDragging() ? juce::Colour (0xff84c7b6) : juce::Colour (0xff38433f));
+            g.fillAll (juce::Colour (0xff09111c));
+            g.setColour (isMouseOverOrDragging() ? rainbowColour (7) : rainbowColour (4, 0.72f));
             g.fillRoundedRectangle (getLocalBounds().withSizeKeepingCentre (juce::jmax (80, getWidth() / 8), 3).toFloat(), 1.5f);
         }
 
@@ -2720,13 +2940,14 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff101211));
+        g.fillAll (juce::Colour (0xff09111c));
+        fillRainbowGradient (g, getLocalBounds().toFloat(), 0.07f);
         auto area = getLocalBounds().reduced (18);
         auto header = area.removeFromTop (30);
-        g.setColour (juce::Colour (0xffdce3e1));
+        g.setColour (juce::Colour (0xffffffff));
         g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
         g.drawText (countingIn ? "Arrangement: count-in" : "Arrangement", header, juce::Justification::centredLeft, true);
-        g.setColour (juce::Colour (0xff8fa19a));
+        g.setColour (rainbowColour (4, 0.85f));
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (juce::String (laneZoom, 2) + "x", header.removeFromRight (64), juce::Justification::centredRight, true);
 
@@ -2744,11 +2965,13 @@ public:
             const auto startX = beatToX (timeline, stateStartBeat, totalBeats);
             const auto endX = beatToX (timeline, stateStartBeat + state.durationBeats, totalBeats);
             auto block = juce::Rectangle<int> (startX, timeline.getY(), juce::jmax (1, endX - startX - 4), timeline.getHeight());
-            g.setColour (juce::Colour (0xff202725));
+            const auto colour = state.tracks.empty() ? rainbowColour (stateIndex) : languageColour (state.tracks.front().language);
+            g.setColour (colour.withAlpha (0.22f));
             g.fillRect (block);
-            g.setColour (juce::Colour (0xff53605c));
+            g.setColour (colour.withAlpha (0.95f));
             g.drawRect (block, 1);
-            g.setColour (juce::Colour (0xffedf2ef));
+            fillRainbowGradient (g, block.withHeight (4).toFloat(), 0.85f);
+            g.setColour (juce::Colour (0xffffffff));
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
             g.drawText (state.name, block.reduced (10), juce::Justification::centredLeft, true);
             stateStartBeat += state.durationBeats;
@@ -2760,7 +2983,7 @@ public:
         if (countingIn)
         {
             const auto countInProgress = countInBeat / juce::jmax (1.0, oneBarBeats (project));
-            g.setColour (juce::Colour (0xffffd36e));
+            g.setColour (rainbowColour (2));
             g.fillRect (timeline.withWidth (juce::roundToInt (timeline.getWidth() * juce::jlimit (0.0, 1.0, countInProgress))).removeFromBottom (5));
         }
 
@@ -2785,7 +3008,7 @@ private:
 
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colour (0xff101211));
+            g.fillAll (juce::Colour (0xff09111c));
             drawTrackLanes (g, getLocalBounds());
         }
 
@@ -2824,7 +3047,8 @@ private:
                 {
                     auto lane = area.removeFromTop (laneHeight).reduced (0, 3);
                     const auto laneBounds = lane;
-                    g.setColour (juce::Colour (0xff1b201f));
+                    const auto colour = languageColour (track.language);
+                    g.setColour (colour.withAlpha (0.1f));
                     g.fillRect (laneBounds);
 
                     const auto stateStartX = beatToX (laneBounds, stateStartBeat, totalBeats);
@@ -2839,21 +3063,20 @@ private:
                                                       juce::jmax (0, tailEndX - stateEndX),
                                                       laneBounds.getHeight());
 
-                    const auto colour = languageColour (track.language);
                     if (! tail.isEmpty())
                     {
-                        g.setColour (colour.withAlpha (0.26f));
+                        g.setColour (colour.withAlpha (0.34f));
                         g.fillRect (tail);
                     }
 
-                    g.setColour (colour.withAlpha (0.82f));
+                    g.setColour (colour.withAlpha (0.92f));
                     g.fillRect (clip);
-                    g.setColour (colour.withAlpha (0.95f));
+                    g.setColour (colour);
                     g.drawRect (clip);
                     if (! tail.isEmpty())
                         g.drawRect (tail);
 
-                    g.setColour (juce::Colour (0xff101211));
+                    g.setColour (juce::Colour (0xff081018));
                     g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
                     g.drawText (state.name + " / " + track.name + " / " + languageName (track.language),
                                 clip.reduced (8, 0).withRight (juce::jmax (clip.getRight(), laneBounds.getX() + 180)),
@@ -2867,7 +3090,7 @@ private:
             if (playing)
             {
                 const auto playheadX = beatToX (getLocalBounds(), currentBeat, totalBeats);
-                g.setColour (juce::Colour (0xfffff0a8));
+                g.setColour (rainbowColour (2));
                 g.drawLine (static_cast<float> (playheadX),
                             static_cast<float> (getLocalBounds().getY()),
                             static_cast<float> (playheadX),
@@ -2911,7 +3134,7 @@ private:
     static void drawPlayhead (juce::Graphics& g, juce::Rectangle<int> timeline, double normalised)
     {
         const auto x = timeline.getX() + juce::roundToInt (timeline.getWidth() * juce::jlimit (0.0, 1.0, normalised));
-        g.setColour (juce::Colour (0xfffff0a8));
+        g.setColour (rainbowColour (2));
         g.drawLine (static_cast<float> (x), static_cast<float> (timeline.getY()), static_cast<float> (x), static_cast<float> (timeline.getBottom()), 2.5f);
     }
 
@@ -3017,11 +3240,12 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        g.fillAll (juce::Colour (0xff101211));
-        g.setColour (juce::Colour (0xffdce3e1));
+        g.fillAll (juce::Colour (0xff09111c));
+        fillRainbowGradient (g, getLocalBounds().toFloat(), 0.07f);
+        g.setColour (juce::Colour (0xffffffff));
         g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
         g.drawText ("Mixer", titleBounds, juce::Justification::centredLeft, true);
-        g.setColour (juce::Colour (0xff8fa19a));
+        g.setColour (rainbowColour (4, 0.9f));
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (juce::String (channels.size()) + " tracks", titleBounds, juce::Justification::centredRight, true);
     }
@@ -3143,9 +3367,9 @@ private:
 
         void paint (juce::Graphics& g) override
         {
-            g.fillAll (juce::Colour (0xff151a18));
-            g.setColour (juce::Colour (0xff45524e));
-            g.drawRect (getLocalBounds(), 1);
+            g.fillAll (juce::Colour (0xff09111c));
+            fillRainbowGradient (g, getLocalBounds().toFloat().withHeight (5.0f), 0.95f);
+            strokeRainbowGradient (g, getLocalBounds().toFloat().reduced (0.5f), 1.2f);
         }
 
         void resized() override
@@ -3276,26 +3500,27 @@ private:
         void paint (juce::Graphics& g) override
         {
             auto bounds = getLocalBounds();
-            g.setColour (juce::Colour (0xff1b201f));
-            g.fillRect (bounds);
             const auto colour = languageColour (track.language);
+            g.setColour (colour.withAlpha (0.12f));
+            g.fillRect (bounds);
             g.setColour (colour);
             g.fillRect (bounds.removeFromTop (4));
+            fillRainbowGradient (g, getLocalBounds().toFloat().withHeight (2.0f), 0.95f);
 
             auto label = getLocalBounds().reduced (7, 5).removeFromTop (48);
-            g.setColour (juce::Colour (0xffdce3e1));
+            g.setColour (juce::Colour (0xffffffff));
             g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
             g.drawFittedText (track.name, label.removeFromTop (26), juce::Justification::centred, 2);
-            g.setColour (juce::Colour (0xff9fb0aa));
+            g.setColour (colour.brighter (0.35f));
             g.setFont (juce::FontOptions (8.6f));
             g.drawFittedText (stateName + " / " + languageName (track.language), label, juce::Justification::centred, 1);
 
             processorSlot = getProcessorSlotBounds();
-            g.setColour (track.processorEnabled ? languageColour (track.processorLanguage).withAlpha (0.30f) : juce::Colour (0xff111715));
+            g.setColour (track.processorEnabled ? languageColour (track.processorLanguage).withAlpha (0.46f) : juce::Colour (0xff111b24));
             g.fillRect (processorSlot);
-            g.setColour (track.processorEnabled ? languageColour (track.processorLanguage).withAlpha (0.9f) : juce::Colour (0xff46534f));
+            g.setColour (track.processorEnabled ? languageColour (track.processorLanguage) : rainbowColour (4, 0.5f));
             g.drawRect (processorSlot, 1);
-            g.setColour (track.processorEnabled ? juce::Colour (0xffeef4f1) : juce::Colour (0xff9aa8a3));
+            g.setColour (track.processorEnabled ? juce::Colour (0xffffffff) : juce::Colour (0xffbdefff));
             g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
             g.drawFittedText (track.processorEnabled
                                 ? "FX " + languageName (track.processorLanguage)
@@ -3311,27 +3536,28 @@ private:
             const auto peakDisplay = dbToMeterProportion (gainToDb (meterPeak));
             auto levelFill = meter.withTop (meter.getBottom()
                                             - juce::roundToInt (static_cast<float> (meter.getHeight()) * rmsDisplay));
-            g.setColour (colour.withAlpha (track.muted ? 0.14f : 0.28f));
+            fillRainbowGradient (g, meter.toFloat(), track.muted ? 0.08f : 0.18f);
+            g.setColour (colour.withAlpha (track.muted ? 0.16f : 0.34f));
             g.fillRect (meter);
-            g.setColour (colour.withAlpha (track.muted ? 0.25f : 0.78f));
+            g.setColour (colour.withAlpha (track.muted ? 0.28f : 0.9f));
             g.fillRect (levelFill);
             const auto peakY = meter.getBottom() - juce::roundToInt (static_cast<float> (meter.getHeight()) * peakDisplay);
-            g.setColour (meterClipping ? juce::Colour (0xffff796e) : juce::Colour (0xffdce3e1).withAlpha (0.62f));
+            g.setColour (meterClipping ? rainbowColour (0) : juce::Colour (0xffffffff).withAlpha (0.72f));
             g.fillRect (meter.withY (juce::jlimit (meter.getY(), meter.getBottom() - 2, peakY)).withHeight (2));
-            g.setColour (juce::Colour (0xfffff0a8).withAlpha (0.62f));
+            g.setColour (rainbowColour (2, 0.82f));
             g.fillRect (meter.withY (zeroDbY).withHeight (1));
             g.setFont (juce::FontOptions (8.0f, juce::Font::bold));
             g.drawText ("0", meter.reduced (3, 0).withY (zeroDbY - 9).withHeight (9), juce::Justification::centredRight, false);
 
             if (meterClipping)
             {
-                g.setColour (juce::Colour (0xffff796e));
+                g.setColour (rainbowColour (0));
                 g.fillRect (meter.withHeight (4));
             }
 
             if (track.muted || track.soloed)
             {
-                g.setColour (track.soloed ? juce::Colour (0xfffff0a8) : juce::Colour (0xffd58b73));
+                g.setColour (track.soloed ? rainbowColour (2) : rainbowColour (0));
                 g.drawRect (getLocalBounds().reduced (2), 2);
             }
         }
@@ -3453,12 +3679,13 @@ private:
         void paint (juce::Graphics& g) override
         {
             auto bounds = getLocalBounds();
-            g.setColour (juce::Colour (0xff1b201f));
+            g.setColour (juce::Colour (0xff101426));
             g.fillRect (bounds);
-            g.setColour (juce::Colour (0xffdce3e1));
+            fillRainbowGradient (g, bounds.toFloat().withHeight (4.0f), 0.95f);
+            g.setColour (juce::Colour (0xffffffff));
             g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
             g.drawFittedText ("Main", bounds.reduced (7, 6).removeFromTop (24), juce::Justification::centred, 1);
-            g.setColour (juce::Colour (0xff9fb0aa));
+            g.setColour (rainbowColour (4, 0.9f));
             g.setFont (juce::FontOptions (8.8f));
             g.drawFittedText ("Stereo out", bounds.reduced (7, 0).withTrimmedTop (28).removeFromTop (20), juce::Justification::centred, 1);
 
@@ -3469,11 +3696,11 @@ private:
                 processorSlots[static_cast<size_t> (i)] = slotArea.removeFromTop (24);
                 slotArea.removeFromTop (7);
                 const auto slot = processorSlots[static_cast<size_t> (i)];
-                g.setColour (processor.processorEnabled ? languageColour (processor.processorLanguage).withAlpha (0.30f) : juce::Colour (0xff111715));
+                g.setColour (processor.processorEnabled ? languageColour (processor.processorLanguage).withAlpha (0.46f) : juce::Colour (0xff111b24));
                 g.fillRect (slot);
-                g.setColour (processor.processorEnabled ? languageColour (processor.processorLanguage).withAlpha (0.9f) : juce::Colour (0xff46534f));
+                g.setColour (processor.processorEnabled ? languageColour (processor.processorLanguage) : rainbowColour (4, 0.5f));
                 g.drawRect (slot, 1);
-                g.setColour (processor.processorEnabled ? juce::Colour (0xffeef4f1) : juce::Colour (0xff9aa8a3));
+                g.setColour (processor.processorEnabled ? juce::Colour (0xffffffff) : juce::Colour (0xffbdefff));
                 g.setFont (juce::FontOptions (8.5f, juce::Font::bold));
                 g.drawFittedText (processor.processorEnabled ? "FX " + juce::String (i + 1) : "FX " + juce::String (i + 1),
                                   slot.reduced (3, 0),
@@ -3482,13 +3709,14 @@ private:
             }
 
             auto meter = getLocalBounds().reduced (18, 0).withTrimmedTop (154).withTrimmedBottom (14);
-            g.setColour (juce::Colour (0xff2f4548));
+            fillRainbowGradient (g, meter.toFloat(), 0.28f);
+            g.setColour (juce::Colour (0xff00d7ff).withAlpha (0.18f));
             g.fillRect (meter);
             const auto zeroDbY = meter.getBottom()
                                  - juce::roundToInt (static_cast<float> (meter.getHeight()) * dbToMeterProportion (0.0f));
-            g.setColour (juce::Colour (0xfffff0a8).withAlpha (0.62f));
+            g.setColour (rainbowColour (2, 0.82f));
             g.fillRect (meter.withY (zeroDbY).withHeight (1));
-            g.setColour (juce::Colour (0xff7fc2d6).withAlpha (0.65f));
+            g.setColour (rainbowColour (4, 0.82f));
             g.drawRect (meter, 1);
         }
 
@@ -3951,8 +4179,8 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto area = getLocalBounds();
-        g.fillAll (juce::Colour (0xff0f1211));
-        g.setColour (isMouseOverOrDragging() ? juce::Colour (0xff84c7b6) : juce::Colour (0xff38433f));
+        g.fillAll (juce::Colour (0xff09111c));
+        g.setColour (isMouseOverOrDragging() ? rainbowColour (7) : rainbowColour (4, 0.72f));
         g.fillRoundedRectangle (area.withSizeKeepingCentre (juce::jmax (80, area.getWidth() / 8), 3).toFloat(), 1.5f);
     }
 
@@ -3991,6 +4219,7 @@ public:
           mixer (project)
     {
         setWantsKeyboardFocus (true);
+        setLookAndFeel (&rainbowLookAndFeel);
 
 #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu (this);
@@ -4040,6 +4269,7 @@ public:
 
     ~MainComponent() override
     {
+        setLookAndFeel (nullptr);
 #if JUCE_MAC
         juce::MenuBarModel::setMacMainMenu (nullptr);
 #else
@@ -4508,7 +4738,7 @@ private:
     {
         return { "01 Gabber Rave.alchemy",
                  "02 Ambient Branches.alchemy",
-                 "03 Polyrhythm Lab.alchemy" };
+                 "03 Neon Autobahn.alchemy" };
     }
 
     static juce::Array<juce::File> exampleDirectories()
@@ -5476,8 +5706,11 @@ private:
             auto* editor = new StateEditorComponent (project.states[static_cast<size_t> (i)],
                                                      [this, i] { addTrackToState (i); },
                                                      [this, i] { removeTrackFromState (i); });
+            const auto& state = project.states[static_cast<size_t> (i)];
+            const auto tabColour = state.tracks.empty() ? rainbowColour (i, 0.78f)
+                                                        : languageColour (state.tracks.front().language).withAlpha (0.78f);
             tabs.addTab (project.states[static_cast<size_t> (i)].name,
-                         juce::Colour (0xff1a1f1d),
+                         tabColour,
                          editor,
                          true);
         }
@@ -6402,6 +6635,7 @@ private:
     }
 
     ProjectModel project;
+    RainbowLookAndFeel rainbowLookAndFeel;
     PerformanceController audio;
     EmbeddedChucKEngine scoreChucK;
     ScoreMachineComponent score;
@@ -6443,7 +6677,7 @@ class MainWindow final : public juce::DocumentWindow
 public:
     explicit MainWindow (juce::String name)
         : DocumentWindow (std::move (name),
-                          juce::Colour (0xff101211),
+                          juce::Colour (0xff09111c),
                           juce::DocumentWindow::closeButton)
     {
         setUsingNativeTitleBar (false);
@@ -6470,7 +6704,7 @@ class AlchemyApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "Alchemy"; }
-    const juce::String getApplicationVersion() override { return "0.1.5"; }
+    const juce::String getApplicationVersion() override { return "0.1.6"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
     void initialise (const juce::String& commandLine) override

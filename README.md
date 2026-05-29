@@ -107,7 +107,7 @@ The examples are copied into the app bundle at build time and are also available
 For a repeatable macOS release zip:
 
 ```sh
-scripts/package_macos_release.sh 0.1.5
+scripts/package_macos_release.sh 0.1.6
 ```
 
 The package script rebuilds the GUI, copies the example projects, copies any local optional Csound/RTcmix/SuperCollider runtime libraries it can find into `Alchemy.app/Contents/Frameworks`, bundles the SuperCollider class library and Faust standard libraries when present, writes a dependency manifest, and creates `dist/Alchemy-v<version>-macOS.zip`.

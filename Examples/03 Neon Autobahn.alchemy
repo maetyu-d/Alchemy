@@ -1,0 +1,434 @@
+{
+  "format": "alchemy",
+  "version": 1,
+  "globalTempoBpm": 122,
+  "globalTimeSigNumerator": 4,
+  "globalTimeSigDenominator": 4,
+  "globalPhaseBeats": 0,
+  "scheduledStopBeat": -1,
+  "loopPlayback": true,
+  "chuckScoreScript": "score.clear();\ntempo(122);\nmeter(4, 4);\nphase(0);\nstate.add(\"Autobahn Theme\", 32, 4);\ntrack.add(1, \"Motorik tick\", \"chuck\");\ntrack.gain(1, 1, 0.44);\ntrack.add(1, \"Neon lead\", \"chuck\");\ntrack.gain(1, 2, 0.50);\ntrack.add(1, \"Warm machine pad\", \"supercollider\");\ntrack.gain(1, 3, 0.42);\ntrack.add(1, \"Round octave bass\", \"chuck\");\ntrack.gain(1, 4, 0.42);\nstate.add(\"Computer Love\", 32, 5);\ntrack.add(2, \"Bell reply\", \"csound\");\ntrack.gain(2, 1, 0.42);\ntrack.add(2, \"Counter melody\", \"chuck\");\ntrack.gain(2, 2, 0.46);\ntrack.add(2, \"Vocoder choir\", \"supercollider\");\ntrack.gain(2, 3, 0.38);\ntrack.add(2, \"RTcmix electric bass\", \"rtcmix\");\ntrack.gain(2, 4, 0.34);\nstate.add(\"Pocket Calculator\", 24, 3);\ntrack.add(3, \"Click arpeggio\", \"chuck\");\ntrack.gain(3, 1, 0.42);\ntrack.add(3, \"Faust laser lead\", \"faust\");\ntrack.gain(3, 2, 0.38);\ntrack.add(3, \"Csound pocket pluck\", \"csound\");\ntrack.gain(3, 3, 0.36);\ntrack.add(3, \"Soft motorik bass\", \"chuck\");\ntrack.gain(3, 4, 0.34);\nstate.add(\"Trans Europe Coda\", 40, 6);\ntrack.add(4, \"Final melody\", \"chuck\");\ntrack.gain(4, 1, 0.50);\ntrack.add(4, \"Wide chord memory\", \"supercollider\");\ntrack.gain(4, 2, 0.44);\ntrack.add(4, \"Faust sparkle\", \"faust\");\ntrack.gain(4, 3, 0.34);\ntrack.add(4, \"Station bass\", \"chuck\");\ntrack.gain(4, 4, 0.36);\nstate.connect(1, 2, 65);\nstate.connect(1, 3, 35);\nstate.connect(2, 3, 45);\nstate.connect(2, 4, 55);\nstate.connect(3, 4, 1);\nplay();",
+  "tempoMap": [
+    {
+      "beat": 0,
+      "bpm": 122
+    },
+    {
+      "beat": 64,
+      "bpm": 126
+    }
+  ],
+  "timeSignatureMap": [
+    {
+      "beat": 0,
+      "numerator": 4,
+      "denominator": 4
+    }
+  ],
+  "phaseRotationMap": [
+    {
+      "beat": 0,
+      "rotationBeats": 0
+    },
+    {
+      "beat": 64,
+      "rotationBeats": 0.5
+    }
+  ],
+  "arrangementOrder": [
+    0,
+    1,
+    2,
+    3
+  ],
+  "states": [
+    {
+      "name": "Autobahn Theme",
+      "durationBeats": 32,
+      "tailBeats": 4,
+      "canvasX": 80,
+      "canvasY": 160,
+      "transitions": [
+        {
+          "targetStateIndex": 1,
+          "weight": 65
+        },
+        {
+          "targetStateIndex": 2,
+          "weight": 35
+        }
+      ],
+      "tracks": [
+        {
+          "name": "Motorik tick",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.44,
+          "muted": false,
+          "soloed": false,
+          "code": "// soft motorik ticks\nNoise tick => HPF hp => Gain tickGain => dac;\nSinOsc kick => Gain kickGain => dac;\n6500 => hp.freq;\nwhile (true) {\n    Math.floor(hostStateBeat * 4.0) $ int => int step;\n    hostStateBeat * 4.0 - Math.floor(hostStateBeat * 4.0) => float phase;\n    Math.exp(-phase * 42.0) => float snap;\n    (step % 4 == 0 ? Math.exp(-phase * 12.0) : 0.0) => float thump;\n    58.0 + thump * 32.0 => kick.freq;\n    snap * Math.max(0.0, Math.min(hostGain, 0.035)) * hostStateGain * hostTrackGain => tickGain.gain;\n    thump * Math.max(0.0, Math.min(hostGain, 0.14)) * hostStateGain * hostTrackGain => kickGain.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Neon lead",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.5,
+          "muted": false,
+          "soloed": false,
+          "code": "// Autobahn lead: bright eighth-note melody\nTriOsc lead => Gain leadGain => dac;\nSinOsc shine => Gain shineGain => dac;\n[64, 66, 68, 71, 73, 71, 68, 66, 64, 68, 71, 76, 75, 71, 68, 66] @=> int notes[];\nwhile (true) {\n    Math.floor(hostStateBeat * 2.0) $ int => int step;\n    hostStateBeat * 2.0 - Math.floor(hostStateBeat * 2.0) => float phase;\n    Std.mtof(notes[step % notes.cap()]) => float f;\n    f => lead.freq;\n    f * 2.01 => shine.freq;\n    Math.exp(-phase * 3.0) * (0.62 + 0.38 * Math.sin(hostGlobalBeat * 0.125 * 6.2831853)) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.15)) * hostStateGain * hostTrackGain * env => leadGain.gain;\n    Math.max(0.0, Math.min(hostGain, 0.06)) * hostStateGain * hostTrackGain * env => shineGain.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Warm machine pad",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.42,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 220, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 122,\n   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 122,\n   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n    var root = freq.max(80) * 0.5;\n    var sweep = SinOsc.kr(0.07).range(600, 2600);\n    var slow = SinOsc.kr(0.11, [0, 1.2]).range(0.98, 1.02);\n    var chord = SinOsc.ar(root * [1, 1.25, 1.5, 1.875, 2.5] * slow[0], 0, [0.20, 0.15, 0.13, 0.10, 0.08]).sum;\n    var shimmer = Pulse.ar(root * [4, 5.01] * slow[1], 0.45).sum * 0.035;\n    LPF.ar((chord + shimmer).tanh, sweep).dup * gain.min(0.12) * stateGain * trackGain\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Round octave bass",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.42,
+          "muted": false,
+          "soloed": false,
+          "code": "// rounded motorik octave bass\nSinOsc sub => Gain subGain => dac;\nSawOsc edge => Gain edgeGain => dac;\n[40, 40, 47, 40, 52, 47, 45, 47, 40, 43, 47, 52, 55, 52, 47, 43] @=> int bass[];\nwhile (true) {\n    Math.floor(hostStateBeat * 2.0) $ int => int step;\n    hostStateBeat * 2.0 - Math.floor(hostStateBeat * 2.0) => float phase;\n    Std.mtof(bass[step % bass.cap()]) => float f;\n    f => sub.freq;\n    f * 2.0 => edge.freq;\n    Math.exp(-phase * 5.4) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.18)) * hostStateGain * hostTrackGain * (0.30 + env * 0.85) => subGain.gain;\n    Math.max(0.0, Math.min(hostGain, 0.055)) * hostStateGain * hostTrackGain * env => edgeGain.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Computer Love",
+      "durationBeats": 32,
+      "tailBeats": 5,
+      "canvasX": 340,
+      "canvasY": 70,
+      "transitions": [
+        {
+          "targetStateIndex": 2,
+          "weight": 45
+        },
+        {
+          "targetStateIndex": 3,
+          "weight": 55
+        }
+      ],
+      "tracks": [
+        {
+          "name": "Bell reply",
+          "language": "csound",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.42,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n    kfreq chnget \"hostFreq\"\n    kgain chnget \"hostGain\"\n    kstate chnget \"hostStateGain\"\n    ktrack chnget \"hostTrackGain\"\n    kbeat chnget \"hostStateBeat\"\n    kphase = frac(kbeat * 2)\n    kenv = exp(-kphase * 5)\n    a1 oscili kgain * 0.20 * kenv * kstate * ktrack, kfreq * 2.0, giSine\n    a2 oscili kgain * 0.12 * kenv * kstate * ktrack, kfreq * 3.0, giSine\n    a3 oscili kgain * 0.08 * kenv * kstate * ktrack, kfreq * 5.0, giSine\n    outs a1 + a2, a1 + a3\nendin",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Counter melody",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.46,
+          "muted": false,
+          "soloed": false,
+          "code": "// glassy counter-melody\nSinOsc a => Gain ag => dac;\nSinOsc b => Gain bg => dac;\n[76, 75, 71, 73, 68, 71, 66, 68, 80, 78, 76, 73, 75, 71, 68, 66] @=> int notes[];\nwhile (true) {\n    Math.floor((hostStateBeat + 0.5) * 1.0) $ int => int step;\n    (hostStateBeat + 0.5) - Math.floor(hostStateBeat + 0.5) => float phase;\n    Std.mtof(notes[step % notes.cap()]) => float f;\n    f => a.freq;\n    f * 1.502 => b.freq;\n    Math.exp(-phase * 2.2) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.12)) * hostStateGain * hostTrackGain * env => ag.gain;\n    Math.max(0.0, Math.min(hostGain, 0.05)) * hostStateGain * hostTrackGain * env => bg.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Vocoder choir",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.38,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 220, gain = 0.07, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 122,\n   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 122,\n   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n    var pulse = LFPulse.kr(tempoBpm / 60 / 2, 0, 0.52).range(0.35, 1.0);\n    var sig = VarSaw.ar(freq.max(90) * [1, 1.5, 2, 2.5], 0, 0.42, [0.10, 0.08, 0.06, 0.05]).sum;\n    RLPF.ar(sig, SinOsc.kr(0.05).range(900, 3400), 0.28).dup * gain.min(0.10) * pulse * stateGain * trackGain\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "RTcmix electric bass",
+          "language": "rtcmix",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "bus_config(\"WAVETABLE\", \"out 0\")\nfreq = makeconnection(\"inlet\", 1, 110)\ngain = makeconnection(\"inlet\", 2, 0.035)\nstategain = makeconnection(\"inlet\", 5, 1.0)\ntrackgain = makeconnection(\"inlet\", 14, 1.0)\nwave = maketable(\"wave\", 4096, \"sine\", 1, 0.35, 0.12)\nWAVETABLE(0, 3600, gain * 0.80 * stategain * trackgain * 32767.0, 55, 0.45, wave)\nWAVETABLE(0, 3600, gain * 0.26 * stategain * trackgain * 32767.0, 110, 0.55, wave)\nWAVETABLE(0, 3600, gain * 0.14 * stategain * trackgain * 32767.0, 165, 0.60, wave)",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Pocket Calculator",
+      "durationBeats": 24,
+      "tailBeats": 3,
+      "canvasX": 340,
+      "canvasY": 245,
+      "transitions": [
+        {
+          "targetStateIndex": 3,
+          "weight": 1
+        }
+      ],
+      "tracks": [
+        {
+          "name": "Click arpeggio",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.42,
+          "muted": false,
+          "soloed": false,
+          "code": "// glassy counter-melody\nSinOsc a => Gain ag => dac;\nSinOsc b => Gain bg => dac;\n[76, 75, 71, 73, 68, 71, 66, 68, 80, 78, 76, 73, 75, 71, 68, 66] @=> int notes[];\nwhile (true) {\n    Math.floor((hostStateBeat + 0.5) * 1.0) $ int => int step;\n    (hostStateBeat + 0.5) - Math.floor(hostStateBeat + 0.5) => float phase;\n    Std.mtof(notes[step % notes.cap()]) => float f;\n    f => a.freq;\n    f * 1.502 => b.freq;\n    Math.exp(-phase * 2.2) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.12)) * hostStateGain * hostTrackGain * env => ag.gain;\n    Math.max(0.0, Math.min(hostGain, 0.05)) * hostStateGain * hostTrackGain * env => bg.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Faust laser lead",
+          "language": "faust",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.38,
+          "muted": false,
+          "soloed": false,
+          "code": "import(\"stdfaust.lib\");\nfreq = hslider(\"hostFreq\", 330, 40, 4000, 0.01);\ngain = hslider(\"hostGain\", 0.045, 0, 0.15, 0.001);\nstateGain = hslider(\"hostStateGain\", 1, 0, 1, 0.001);\ntrackGain = hslider(\"hostTrackGain\", 1, 0, 1, 0.001);\nlead = os.osc(freq * 2) * 0.62 + os.osc(freq * 3) * 0.22 + os.osc(freq * 4.01) * 0.12;\nprocess = lead * gain * stateGain * trackGain <: _, _;",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Csound pocket pluck",
+          "language": "csound",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.36,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n    kfreq chnget \"hostFreq\"\n    kgain chnget \"hostGain\"\n    kstate chnget \"hostStateGain\"\n    ktrack chnget \"hostTrackGain\"\n    kbeat chnget \"hostStateBeat\"\n    kphase = frac(kbeat * 4)\n    kenv = exp(-kphase * 7)\n    a1 vco2 kgain * 0.10 * kenv * kstate * ktrack, kfreq * 1.5, 2\n    a2 oscili kgain * 0.07 * kenv * kstate * ktrack, kfreq * 3.0, giSine\n    outs a1 + a2, a1 - a2\nendin",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Soft motorik bass",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "// rounded motorik octave bass\nSinOsc sub => Gain subGain => dac;\nSawOsc edge => Gain edgeGain => dac;\n[40, 40, 47, 40, 52, 47, 45, 47, 40, 43, 47, 52, 55, 52, 47, 43] @=> int bass[];\nwhile (true) {\n    Math.floor(hostStateBeat * 2.0) $ int => int step;\n    hostStateBeat * 2.0 - Math.floor(hostStateBeat * 2.0) => float phase;\n    Std.mtof(bass[step % bass.cap()]) => float f;\n    f => sub.freq;\n    f * 2.0 => edge.freq;\n    Math.exp(-phase * 5.4) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.18)) * hostStateGain * hostTrackGain * (0.30 + env * 0.85) => subGain.gain;\n    Math.max(0.0, Math.min(hostGain, 0.055)) * hostStateGain * hostTrackGain * env => edgeGain.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Trans Europe Coda",
+      "durationBeats": 40,
+      "tailBeats": 6,
+      "canvasX": 620,
+      "canvasY": 160,
+      "transitions": [],
+      "tracks": [
+        {
+          "name": "Final melody",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.5,
+          "muted": false,
+          "soloed": false,
+          "code": "// Autobahn lead: bright eighth-note melody\nTriOsc lead => Gain leadGain => dac;\nSinOsc shine => Gain shineGain => dac;\n[64, 66, 68, 71, 73, 71, 68, 66, 64, 68, 71, 76, 75, 71, 68, 66] @=> int notes[];\nwhile (true) {\n    Math.floor(hostStateBeat * 2.0) $ int => int step;\n    hostStateBeat * 2.0 - Math.floor(hostStateBeat * 2.0) => float phase;\n    Std.mtof(notes[step % notes.cap()]) => float f;\n    f => lead.freq;\n    f * 2.01 => shine.freq;\n    Math.exp(-phase * 3.0) * (0.62 + 0.38 * Math.sin(hostGlobalBeat * 0.125 * 6.2831853)) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.15)) * hostStateGain * hostTrackGain * env => leadGain.gain;\n    Math.max(0.0, Math.min(hostGain, 0.06)) * hostStateGain * hostTrackGain * env => shineGain.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Wide chord memory",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.44,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 220, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 122,\n   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1, trackTempoBpm = 122,\n   trackTimeSigNumerator = 4, trackTimeSigDenominator = 4, trackPhaseRotation = 0|\n    var root = freq.max(80) * 0.5;\n    var sweep = SinOsc.kr(0.07).range(600, 2600);\n    var slow = SinOsc.kr(0.11, [0, 1.2]).range(0.98, 1.02);\n    var chord = SinOsc.ar(root * [1, 1.25, 1.5, 1.875, 2.5] * slow[0], 0, [0.20, 0.15, 0.13, 0.10, 0.08]).sum;\n    var shimmer = Pulse.ar(root * [4, 5.01] * slow[1], 0.45).sum * 0.035;\n    LPF.ar((chord + shimmer).tanh, sweep).dup * gain.min(0.12) * stateGain * trackGain\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Faust sparkle",
+          "language": "faust",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "import(\"stdfaust.lib\");\nfreq = hslider(\"hostFreq\", 440, 40, 5000, 0.01);\ngain = hslider(\"hostGain\", 0.035, 0, 0.12, 0.001);\nstateGain = hslider(\"hostStateGain\", 1, 0, 1, 0.001);\ntrackGain = hslider(\"hostTrackGain\", 1, 0, 1, 0.001);\nsig = os.osc(freq * 4) * 0.55 + os.osc(freq * 6.02) * 0.25;\nprocess = sig * gain * stateGain * trackGain <: _, _;",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        },
+        {
+          "name": "Station bass",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 122,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.36,
+          "muted": false,
+          "soloed": false,
+          "code": "// rounded motorik octave bass\nSinOsc sub => Gain subGain => dac;\nSawOsc edge => Gain edgeGain => dac;\n[40, 40, 47, 40, 52, 47, 45, 47, 40, 43, 47, 52, 55, 52, 47, 43] @=> int bass[];\nwhile (true) {\n    Math.floor(hostStateBeat * 2.0) $ int => int step;\n    hostStateBeat * 2.0 - Math.floor(hostStateBeat * 2.0) => float phase;\n    Std.mtof(bass[step % bass.cap()]) => float f;\n    f => sub.freq;\n    f * 2.0 => edge.freq;\n    Math.exp(-phase * 5.4) => float env;\n    Math.max(0.0, Math.min(hostGain, 0.18)) * hostStateGain * hostTrackGain * (0.30 + env * 0.85) => subGain.gain;\n    Math.max(0.0, Math.min(hostGain, 0.055)) * hostStateGain * hostTrackGain * env => edgeGain.gain;\n    1::samp => now;\n}",
+          "processorLanguage": "chuck",
+          "processorCode": "",
+          "processorEnabled": false,
+          "gainEvents": []
+        }
+      ]
+    }
+  ],
+  "masterProcessors": [
+    {
+      "name": "Master FX 1",
+      "language": "chuck",
+      "sync": true,
+      "tempo": 122,
+      "timeSigNumerator": 4,
+      "timeSigDenominator": 4,
+      "phase": 0,
+      "gain": 0.75,
+      "muted": false,
+      "soloed": false,
+      "code": "",
+      "processorLanguage": "chuck",
+      "processorCode": "",
+      "processorEnabled": false,
+      "gainEvents": []
+    },
+    {
+      "name": "Master FX 2",
+      "language": "chuck",
+      "sync": true,
+      "tempo": 122,
+      "timeSigNumerator": 4,
+      "timeSigDenominator": 4,
+      "phase": 0,
+      "gain": 0.75,
+      "muted": false,
+      "soloed": false,
+      "code": "",
+      "processorLanguage": "chuck",
+      "processorCode": "",
+      "processorEnabled": false,
+      "gainEvents": []
+    },
+    {
+      "name": "Master FX 3",
+      "language": "chuck",
+      "sync": true,
+      "tempo": 122,
+      "timeSigNumerator": 4,
+      "timeSigDenominator": 4,
+      "phase": 0,
+      "gain": 0.75,
+      "muted": false,
+      "soloed": false,
+      "code": "",
+      "processorLanguage": "chuck",
+      "processorCode": "",
+      "processorEnabled": false,
+      "gainEvents": []
+    }
+  ]
+}

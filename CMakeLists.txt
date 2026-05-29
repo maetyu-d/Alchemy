@@ -13,6 +13,8 @@ set(CHUCK_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/chuck/src/core")
 set(WELD_RTCMIX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rtcmix" CACHE PATH "Path to an RTcmix checkout with an embedded build")
 set(WELD_RTCMIX_LIBRARY "" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib or librtcmix_embedded.so")
 set(WELD_CSOUND_LIBRARY "" CACHE FILEPATH "Optional path to libcsound64.dylib, libcsound.dylib, or libcsound.so")
+set(WELD_FAUST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/faust" CACHE PATH "Path to a Faust checkout with a libfaust build")
+set(WELD_FAUST_LIBRARY "" CACHE FILEPATH "Optional path to libfaust.dylib or libfaust.so")
 set(WELD_SUPERCOLLIDER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/supercollider" CACHE PATH "Path to a SuperCollider checkout with the Alchemy host audio backend")
 set(WELD_SUPERCOLLIDER_LIBRARY "" CACHE FILEPATH "Optional path to a host-audio libscsynth.dylib or libscsynth.so")
 set(WELD_SUPERCOLLIDER_LANG_LIBRARY "" CACHE FILEPATH "Optional path to libweldsclang.dylib or libweldsclang.so")
@@ -22,6 +24,9 @@ set(WELD_RTCMIX_INCLUDE_DIR "${WELD_RTCMIX_ROOT}/src/rtcmix")
 set(WELD_RTCMIX_DEFAULT_LIBRARY "")
 set(WELD_HAS_CSOUND 1)
 set(WELD_CSOUND_DEFAULT_LIBRARY "")
+set(WELD_HAS_FAUST 0)
+set(WELD_FAUST_INCLUDE_DIR "${WELD_FAUST_ROOT}/architecture")
+set(WELD_FAUST_DEFAULT_LIBRARY "")
 set(WELD_HAS_SUPERCOLLIDER 0)
 set(WELD_SUPERCOLLIDER_INCLUDE_DIR "${WELD_SUPERCOLLIDER_ROOT}/include/server")
 set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "")
@@ -75,6 +80,31 @@ if (WELD_CSOUND_LIBRARY STREQUAL "")
     message(STATUS "Csound embedded backend enabled; set WELD_CSOUND_LIBRARY or WELD_CSOUND_LIBRARY env var before running to choose libcsound")
 else()
     message(STATUS "Csound embedded backend enabled; runtime library hint: ${WELD_CSOUND_LIBRARY}")
+endif()
+
+if (APPLE AND EXISTS "${WELD_FAUST_ROOT}/build/lib/libfaust.dylib")
+    set(WELD_FAUST_DEFAULT_LIBRARY "${WELD_FAUST_ROOT}/build/lib/libfaust.dylib")
+elseif (UNIX AND EXISTS "${WELD_FAUST_ROOT}/build/lib/libfaust.so")
+    set(WELD_FAUST_DEFAULT_LIBRARY "${WELD_FAUST_ROOT}/build/lib/libfaust.so")
+elseif (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.dylib")
+    set(WELD_FAUST_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.dylib")
+elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.so")
+    set(WELD_FAUST_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.so")
+endif()
+
+if (WELD_FAUST_LIBRARY STREQUAL "" AND NOT WELD_FAUST_DEFAULT_LIBRARY STREQUAL "")
+    set(WELD_FAUST_LIBRARY "${WELD_FAUST_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional path to libfaust.dylib or libfaust.so" FORCE)
+endif()
+
+if (EXISTS "${WELD_FAUST_INCLUDE_DIR}/faust/dsp/interpreter-dsp-c.h")
+    set(WELD_HAS_FAUST 1)
+    if (WELD_FAUST_LIBRARY STREQUAL "")
+        message(STATUS "Faust embedded backend enabled; set WELD_FAUST_LIBRARY or WELD_FAUST_LIBRARY env var before running to choose libfaust")
+    else()
+        message(STATUS "Faust embedded backend enabled; runtime library hint: ${WELD_FAUST_LIBRARY}")
+    endif()
+else()
+    message(STATUS "Faust embedded backend disabled; set WELD_FAUST_ROOT after cloning Faust")
 endif()
 
 if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.dylib")
@@ -237,6 +267,12 @@ if (WELD_HAS_SUPERCOLLIDER)
             ${WELD_SUPERCOLLIDER_ROOT}/include/common)
 endif()
 
+if (WELD_HAS_FAUST)
+    target_include_directories(weld_chuck_engine
+        SYSTEM PRIVATE
+            ${WELD_FAUST_INCLUDE_DIR})
+endif()
+
 target_link_libraries(weld_chuck_engine
     PRIVATE
         chuck_core
@@ -252,9 +288,11 @@ target_compile_definitions(weld_chuck_engine
     PRIVATE
         WELD_HAS_RTCMIX=${WELD_HAS_RTCMIX}
         WELD_HAS_CSOUND=${WELD_HAS_CSOUND}
+        WELD_HAS_FAUST=${WELD_HAS_FAUST}
         WELD_HAS_SUPERCOLLIDER=${WELD_HAS_SUPERCOLLIDER}
         WELD_RTCMIX_DEFAULT_LIBRARY="${WELD_RTCMIX_LIBRARY}"
         WELD_CSOUND_DEFAULT_LIBRARY="${WELD_CSOUND_LIBRARY}"
+        WELD_FAUST_DEFAULT_LIBRARY="${WELD_FAUST_LIBRARY}"
         WELD_SUPERCOLLIDER_DEFAULT_LIBRARY="${WELD_SUPERCOLLIDER_LIBRARY}"
         WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY="${WELD_SUPERCOLLIDER_LANG_LIBRARY}"
         JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1
@@ -308,6 +346,13 @@ add_custom_command(TARGET AlchemyGui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/Examples"
             "$<TARGET_BUNDLE_DIR:AlchemyGui>/Contents/Resources/Examples")
+
+if (EXISTS "${WELD_FAUST_ROOT}/libraries/stdfaust.lib")
+    add_custom_command(TARGET AlchemyGui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${WELD_FAUST_ROOT}/libraries"
+                "$<TARGET_BUNDLE_DIR:AlchemyGui>/Contents/Resources/Faust/libraries")
+endif()
 
 add_executable(AlchemyEngineBoundaryTest
     Tests/EngineBoundaryTest.cpp)

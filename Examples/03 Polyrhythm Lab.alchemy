@@ -7,7 +7,7 @@
   "globalPhaseBeats": 0.5,
   "scheduledStopBeat": -1,
   "loopPlayback": true,
-  "chuckScoreScript": "score.clear();\ntempo(132);\nmeter(7, 8);\nphase(0.5);\nstate.add(\"Seven Gate\", 28, 3);\ntrack.add(1, \"SC pulse drums\", \"supercollider\");\ntrack.gain(1, 1, 0.30);\ntrack.add(1, \"seven pulse\", \"chuck\");\ntrack.gain(1, 2, 0.32);\ntrack.add(1, \"phase bell\", \"csound\");\ntrack.gain(1, 3, 0.30);\ntrack.add(1, \"sub orbit\", \"chuck\");\ntrack.gain(1, 4, 0.28);\nstate.add(\"Five Turn\", 20, 5);\ntrack.add(2, \"SC off-grid drums\", \"supercollider\");\ntrack.gain(2, 1, 0.28);\ntrack.add(2, \"five answer\", \"chuck\");\ntrack.gain(2, 2, 0.30);\ntrack.add(2, \"off-grid bass\", \"chuck\");\ntrack.gain(2, 3, 0.30);\ntrack.add(2, \"SC glass cloud\", \"supercollider\");\ntrack.gain(2, 4, 0.26);\nstate.add(\"Eleven Field\", 22, 5);\ntrack.add(3, \"SC eleven drums\", \"supercollider\");\ntrack.gain(3, 1, 0.28);\ntrack.add(3, \"eleven shimmer\", \"supercollider\");\ntrack.gain(3, 2, 0.28);\ntrack.add(3, \"RTcmix low clock\", \"rtcmix\");\ntrack.gain(3, 3, 0.34);\ntrack.add(3, \"needle counter\", \"chuck\");\ntrack.gain(3, 4, 0.26);\nstate.connect(1, 2, 60);\nstate.connect(1, 3, 40);\nstate.connect(2, 1, 25);\nstate.connect(2, 3, 75);\nstate.connect(3, 1, 1);\nplay();",
+  "chuckScoreScript": "score.clear();\ntempo(132);\nmeter(7, 8);\nphase(0.5);\nstate.add(\"Seven Gate\", 28, 3);\ntrack.add(1, \"SC pulse drums\", \"supercollider\");\ntrack.gain(1, 1, 0.72);\ntrack.add(1, \"seven pulse\", \"chuck\");\ntrack.gain(1, 2, 0.32);\ntrack.add(1, \"phase bell\", \"csound\");\ntrack.gain(1, 3, 0.30);\ntrack.add(1, \"sub orbit\", \"chuck\");\ntrack.gain(1, 4, 0.28);\nstate.add(\"Five Turn\", 20, 5);\ntrack.add(2, \"SC off-grid drums\", \"supercollider\");\ntrack.gain(2, 1, 0.70);\ntrack.add(2, \"five answer\", \"chuck\");\ntrack.gain(2, 2, 0.30);\ntrack.add(2, \"off-grid bass\", \"chuck\");\ntrack.gain(2, 3, 0.30);\ntrack.add(2, \"SC glass cloud\", \"supercollider\");\ntrack.gain(2, 4, 0.26);\nstate.add(\"Eleven Field\", 22, 5);\ntrack.add(3, \"SC eleven drums\", \"supercollider\");\ntrack.gain(3, 1, 0.70);\ntrack.add(3, \"eleven shimmer\", \"supercollider\");\ntrack.gain(3, 2, 0.28);\ntrack.add(3, \"RTcmix low clock\", \"rtcmix\");\ntrack.gain(3, 3, 0.34);\ntrack.add(3, \"needle counter\", \"chuck\");\ntrack.gain(3, 4, 0.26);\nstate.connect(1, 2, 60);\nstate.connect(1, 3, 40);\nstate.connect(2, 1, 25);\nstate.connect(2, 3, 75);\nstate.connect(3, 1, 1);\nplay();",
   "tempoMap": [
     {
       "beat": 0,
@@ -74,10 +74,10 @@
           "timeSigNumerator": 7,
           "timeSigDenominator": 8,
           "phase": 0,
-          "gain": 0.3,
+          "gain": 0.72,
           "muted": false,
           "soloed": false,
-          "code": "{ |freq = 440, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var tempo, snare, bdrum, hihat, drunk, swing;\n    tempo = Impulse.ar((tempoBpm / 60) * 2);\n    swing = PulseDivider.ar(tempo, 2, 1) * 0.006;\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.46));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.50));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005 + swing, 0.28);\n    ((snare + bdrum + hihat) * gain * 2.2 * stateGain * trackGain).dup\n}",
+          "code": "{ |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var snare, bdrum, hihat;\n    var tempo = 4;\n    tempo = Impulse.ar(tempo);\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.5));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.5));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005, 0.5);\n    ((snare + bdrum + hihat) * 0.4 * stateGain * trackGain).dup\n}",
           "gainEvents": []
         },
         {
@@ -149,10 +149,10 @@
           "timeSigNumerator": 5,
           "timeSigDenominator": 4,
           "phase": 0.25,
-          "gain": 0.28,
+          "gain": 0.7,
           "muted": false,
           "soloed": false,
-          "code": "{ |freq = 440, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var tempo, snare, bdrum, hihat, drunk, swing;\n    tempo = Impulse.ar((tempoBpm / 60) * 2);\n    swing = PulseDivider.ar(tempo, 2, 1) * 0.006;\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.46));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.50));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005 + swing, 0.28);\n    ((snare + bdrum + hihat) * gain * 2.2 * stateGain * trackGain).dup\n}",
+          "code": "{ |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var snare, bdrum, hihat;\n    var tempo = 4;\n    tempo = Impulse.ar(tempo);\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.5));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.5));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005, 0.5);\n    ((snare + bdrum + hihat) * 0.4 * stateGain * trackGain).dup\n}",
           "gainEvents": []
         },
         {
@@ -220,10 +220,10 @@
           "timeSigNumerator": 11,
           "timeSigDenominator": 8,
           "phase": 0,
-          "gain": 0.28,
+          "gain": 0.7,
           "muted": false,
           "soloed": false,
-          "code": "{ |freq = 440, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var tempo, snare, bdrum, hihat, drunk, swing;\n    tempo = Impulse.ar((tempoBpm / 60) * 2);\n    swing = PulseDivider.ar(tempo, 2, 1) * 0.006;\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.46));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.50));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005 + swing, 0.28);\n    ((snare + bdrum + hihat) * gain * 2.2 * stateGain * trackGain).dup\n}",
+          "code": "{ |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var snare, bdrum, hihat;\n    var tempo = 4;\n    tempo = Impulse.ar(tempo);\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.5));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.5));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005, 0.5);\n    ((snare + bdrum + hihat) * 0.4 * stateGain * trackGain).dup\n}",
           "gainEvents": []
         },
         {

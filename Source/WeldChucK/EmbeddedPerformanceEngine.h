@@ -145,7 +145,7 @@ private:
     };
 
     bool prepareSequenceUnlocked();
-    bool prepareStateRuntimeUnlocked (StateRuntime& runtime);
+    bool prepareStateRuntimeUnlocked (StateRuntime& runtime, int stateIndex);
     bool prepareTrackRuntimeUnlocked (StateRuntime::TrackRuntime& runtime);
     bool rebuildTimelineUnlocked();
     bool setTempoMapUnlocked (std::vector<TempoEvent> events);

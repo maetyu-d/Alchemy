@@ -5165,6 +5165,7 @@ private:
 
     void quietTransportForStructureEdit()
     {
+        scorePlaybackOwnedByRunButton = false;
         countingIn = false;
         playing = false;
         countInBeat = 0.0;
@@ -5221,6 +5222,7 @@ private:
 
     void stopPlayback()
     {
+        scorePlaybackOwnedByRunButton = false;
         countingIn = false;
         playing = false;
         countInBeat = 0.0;
@@ -5275,11 +5277,15 @@ private:
             }
         }
 
+        if (scorePlaybackOwnedByRunButton && ! chuckScoreRunning && ! countingIn && ! playing)
+            scorePlaybackOwnedByRunButton = false;
+
         updateTransportViews();
     }
 
     void updateTransportViews()
     {
+        score.setScoreScriptRunning (chuckScoreRunning || scorePlaybackOwnedByRunButton);
         score.setTransport (countingIn, playing, currentBeat);
         arrangement.setTransport (countingIn, playing, countInBeat, currentBeat);
         mixer.setMeterSnapshots (audio.getTrackMeters());
@@ -5496,7 +5502,7 @@ private:
         }
     }
 
-    void applyCapturedChucKScoreScript (const std::vector<ScoreCommandEvent>& events)
+    bool applyCapturedChucKScoreScript (const std::vector<ScoreCommandEvent>& events)
     {
         auto playEventIndex = events.size();
 
@@ -5513,7 +5519,7 @@ private:
         }
 
         if (playEventIndex >= events.size())
-            return;
+            return false;
 
         applyCapturedTimelineMaps (events, playEventIndex);
         mixer.refresh();
@@ -5521,17 +5527,19 @@ private:
         score.repaint();
         arrangement.refresh();
         startPlayback();
+        return true;
     }
 
     void runChucKScoreScript (const juce::String& script)
     {
+        scorePlaybackOwnedByRunButton = false;
         std::vector<ScoreCommandEvent> events;
         juce::String captureError;
         if (captureChucKScoreScript (script, events, captureError))
         {
             chuckScoreRunning = false;
-            score.setScoreScriptRunning (false);
-            applyCapturedChucKScoreScript (events);
+            scorePlaybackOwnedByRunButton = applyCapturedChucKScoreScript (events);
+            updateTransportViews();
             return;
         }
 
@@ -5583,7 +5591,11 @@ private:
     void stopChucKScoreScript()
     {
         chuckScoreRunning = false;
-        score.setScoreScriptRunning (false);
+        if (scorePlaybackOwnedByRunButton)
+            stopPlayback();
+        else
+            updateTransportViews();
+
         scoreChucK.release();
         chuckScorePrepared = false;
     }
@@ -5679,10 +5691,11 @@ private:
                 score.repaint();
                 arrangement.refresh();
                 chuckScoreRunning = false;
-                score.setScoreScriptRunning (false);
+                updateTransportViews();
                 break;
 
             case ScoreCommandId::play:
+                scorePlaybackOwnedByRunButton = true;
                 startPlayback();
                 break;
 
@@ -5953,6 +5966,7 @@ private:
     bool playing = false;
     bool chuckScorePrepared = false;
     bool chuckScoreRunning = false;
+    bool scorePlaybackOwnedByRunButton = false;
     int dragStartTopHeight = 0;
     int dirtyPollCounter = 0;
     double topPanelRatio = defaultTopPanelRatio;

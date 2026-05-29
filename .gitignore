@@ -20,6 +20,7 @@ CMakeUserPresets.json
 # Locally cloned optional language runtimes. Recreate these from README.md
 # and apply patches from third_party/patches when needed.
 third_party/csound/
+third_party/faust/
 third_party/local/
 third_party/purr-data/
 third_party/rtcmix/

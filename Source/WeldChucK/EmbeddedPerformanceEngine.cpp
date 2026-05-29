@@ -107,6 +107,18 @@ bool EmbeddedPerformanceEngine::loadSequence (const std::vector<State>& states)
 
     releaseSequenceUnlocked();
     requestedStates = states;
+    for (int stateIndex = 0; stateIndex < static_cast<int> (requestedStates.size()); ++stateIndex)
+    {
+        auto& state = requestedStates[static_cast<size_t> (stateIndex)];
+        for (int trackIndex = 0; trackIndex < static_cast<int> (state.tracks.size()); ++trackIndex)
+        {
+            auto& track = state.tracks[static_cast<size_t> (trackIndex)];
+            if (track.meterStateIndex < 0)
+                track.meterStateIndex = stateIndex;
+            if (track.meterTrackIndex < 0)
+                track.meterTrackIndex = trackIndex;
+        }
+    }
 
     if (requestedStates.empty())
     {
@@ -695,12 +707,13 @@ bool EmbeddedPerformanceEngine::prepareSequenceUnlocked()
     stateRuntimes.reserve (requestedStates.size());
     auto nextMeterSlot = 0;
 
-    for (const auto& state : requestedStates)
+    for (int stateIndex = 0; stateIndex < static_cast<int> (requestedStates.size()); ++stateIndex)
     {
+        const auto& state = requestedStates[static_cast<size_t> (stateIndex)];
         StateRuntime runtime;
         runtime.definition = state;
 
-        if (! prepareStateRuntimeUnlocked (runtime))
+        if (! prepareStateRuntimeUnlocked (runtime, stateIndex))
         {
             stateRuntimes.clear();
             ready.store (false, std::memory_order_release);
@@ -753,14 +766,20 @@ bool EmbeddedPerformanceEngine::prepareSequenceUnlocked()
     return true;
 }
 
-bool EmbeddedPerformanceEngine::prepareStateRuntimeUnlocked (StateRuntime& runtime)
+bool EmbeddedPerformanceEngine::prepareStateRuntimeUnlocked (StateRuntime& runtime, int stateIndex)
 {
     auto tracks = normaliseTracksForState (runtime.definition);
     runtime.tracks.clear();
     runtime.tracks.reserve (tracks.size());
 
-    for (auto& track : tracks)
+    for (int trackIndex = 0; trackIndex < static_cast<int> (tracks.size()); ++trackIndex)
     {
+        auto& track = tracks[static_cast<size_t> (trackIndex)];
+        if (track.meterStateIndex < 0)
+            track.meterStateIndex = stateIndex;
+        if (track.meterTrackIndex < 0)
+            track.meterTrackIndex = trackIndex;
+
         StateRuntime::TrackRuntime trackRuntime;
         trackRuntime.definition = std::move (track);
 

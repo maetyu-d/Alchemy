@@ -36,7 +36,7 @@ engine.loadProgramAsync (programText, parameterBindings);
 engine.process (input, output);
 ```
 
-The language slots are `chuck`, `faust`, `csound`, `supercollider`, and `rtcmix`. ChucK is always built in. Csound is built as a dynamic in-process backend and loads `libcsound` at prepare time. RTcmix is built when an RTcmix checkout with `RTcmix_API.h` is available, and it dynamically loads an embedded RTcmix runtime library at prepare time. SuperCollider is built when a SuperCollider checkout with the Alchemy host-audio `libscsynth` patch is available, and it dynamically loads that in-process runtime at prepare time. Faust is declared as an in-process backend and fails closed until its native host-buffer integration is linked. None of these backends spawn external interpreters or open their own audio devices; unavailable builds clear output buffers if asked to render. Use `EmbeddedLanguageEngine::isLanguageBuiltIn()` and `getLanguageBuildStatus()` to check the compiled-in set at runtime.
+The language slots are `chuck`, `faust`, `csound`, `supercollider`, and `rtcmix`. ChucK is always built in. Faust is built when a Faust checkout with `faust/dsp/interpreter-dsp-c.h` is available, and it dynamically loads `libfaust` at prepare time. Csound is built as a dynamic in-process backend and loads `libcsound` at prepare time. RTcmix is built when an RTcmix checkout with `RTcmix_API.h` is available, and it dynamically loads an embedded RTcmix runtime library at prepare time. SuperCollider is built when a SuperCollider checkout with the Alchemy host-audio `libscsynth` patch is available, and it dynamically loads that in-process runtime at prepare time. None of these backends spawn external interpreters or open their own audio devices; unavailable builds clear output buffers if asked to render. Use `EmbeddedLanguageEngine::isLanguageBuiltIn()` and `getLanguageBuildStatus()` to check the compiled-in set at runtime.
 
 `EmbeddedPerformanceEngine` sits above the language facade for pieces that move between language states. It keeps prepared language runtimes for every track inside every state, advances a sample-clocked playhead at a global tempo, and mixes overlapping state windows so an outgoing state can keep rendering its tail while the next state starts:
 
@@ -111,6 +111,14 @@ scripts/package_macos_release.sh 0.1.1
 ```
 
 The package script rebuilds the GUI, copies the example projects, copies any local optional Csound/RTcmix/SuperCollider runtime libraries it can find into `Alchemy.app/Contents/Frameworks`, writes a dependency manifest, and creates `dist/Alchemy-v<version>-macOS.zip`.
+
+To check that embedded language backends can run representative online/manual-style examples:
+
+```sh
+build/Alchemy_artefacts/Release/Alchemy --language-example-test
+```
+
+This renders ChucK, Faust, Csound, SuperCollider, and RTcmix examples through the actual in-process backends and checks for finite, non-silent output. Languages that are declared but not built into the current binary are reported as skipped. SuperCollider examples from `supercollider.github.io/examples` that use `{ ... }.play` should be pasted into Alchemy as the function body only, returning the audio signal; Alchemy owns the synth lifetime and output routing.
 
 The score VM exposes `score`, `state`, and `track` APIs inside ChucK. String arguments are marshalled to the host bridge, while timing, loops, functions, and conditionals are ordinary ChucK:
 
@@ -189,6 +197,29 @@ make BUILDTYPE=OSXEMBEDDED AUDIODRIVER=EMBEDDEDAUDIO RTLIBTYPE=DYNAMIC
 
 The Alchemy CMake configure step looks for `third_party/rtcmix/src/rtcmix/RTcmix_API.h` and records a runtime library hint for `librtcmix_embedded.dylib` or `librtcmix_embedded.so`. You can override that path with `-DWELD_RTCMIX_LIBRARY=/path/to/librtcmix_embedded.dylib` or by setting the `WELD_RTCMIX_LIBRARY` environment variable before running the host.
 
+### Faust Backend
+
+Build Faust's interpreter libfaust before configuring Alchemy if you want the Faust backend active:
+
+```sh
+git clone --depth 1 https://github.com/grame-cncm/faust.git third_party/faust
+git -C third_party/faust submodule update --init --depth 1 libraries
+cmake -S third_party/faust/build -B build-faust \
+  -C third_party/faust/build/backends/interp.cmake \
+  -C third_party/faust/build/targets/interp.cmake \
+  -DINCLUDE_LLVM=OFF -DUSE_LLVM_CONFIG=OFF -DCMAKE_BUILD_TYPE=Release
+cmake --build build-faust --target dynamiclib
+```
+
+The Alchemy CMake configure step looks for `third_party/faust/architecture/faust/dsp/interpreter-dsp-c.h` and records a runtime hint for `third_party/faust/build/lib/libfaust.dylib` or `.so`. You can override that path with `-DWELD_FAUST_LIBRARY=/path/to/libfaust.dylib` or by setting the `WELD_FAUST_LIBRARY` environment variable before running the host. Faust source loading is in-process and host-pulled. Alchemy compiles the DSP from a source string, swaps the prepared instance into the render path, feeds host audio buffers to `compute()`, and maps host parameters to Faust controls whose labels match the binding names:
+
+```faust
+import("stdfaust.lib");
+hostFreq = hslider("hostFreq", 220, 30, 4000, 1);
+hostGain = hslider("hostGain", 0.14, 0, 0.4, 0.001);
+process = os.osc(hostFreq) * hostGain <: _, _;
+```
+
 ### Csound Backend
 
 Build Csound from source before configuring Alchemy if you want the Csound backend to render locally:
@@ -257,7 +288,7 @@ The first prototype disables ChucK MIDI, HID, serial, shell, and on-the-fly netw
 
 The multi-language facade keeps the same tightness boundary for future language backends:
 
-- Faust should be embedded through libfaust's LLVM or interpreter factory API, creating a candidate DSP instance off the audio callback and calling `dsp::compute()` from the host-owned render path after commit.
+- Faust is embedded through libfaust's interpreter factory API. Alchemy compiles a candidate DSP instance off the audio callback, binds host controls to Faust UI zones such as `hslider("hostFreq", ...)`, and calls `compute()` from the host-owned render path after commit.
 - Csound is embedded through `libcsound` with host-implemented audio I/O. Alchemy compiles an orchestra body into a private candidate instance, forces `ksmps = 1`, maps controls through Csound software channels, drives `spin`/`spout` directly, and performs one Csound k-cycle per host sample so parameter and audio exchange are sample-tight.
 - SuperCollider is embedded as `libscsynth` plus an in-process `libsclang` bridge, not by launching `scsynth`/`sclang` or using OSC to an external server. Alchemy's host-pulled audio driver/world adapter lets JUCE own the callback, feeds SC input/output buses directly, compiles SC source to SynthDef bytes off the audio callback, and commits server packets directly into the private world.
 - RTcmix is embedded through its `EMBEDDEDAUDIO` C API. Alchemy loads the embedded runtime in-process, configures float interleaved buffers, maps host parameters to `makeconnection("inlet", ...)` pfields, and calls `RTcmix_runAudio()` from the host render path. RTcmix-owned audio threads or command-line `CMIX` execution do not meet this repository's tightness rule.

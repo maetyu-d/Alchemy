@@ -27,7 +27,11 @@
 #define WELD_HAS_CSOUND 0
 #endif
 
-#if WELD_HAS_RTCMIX || WELD_HAS_SUPERCOLLIDER || WELD_HAS_CSOUND
+#ifndef WELD_HAS_FAUST
+#define WELD_HAS_FAUST 0
+#endif
+
+#if WELD_HAS_RTCMIX || WELD_HAS_SUPERCOLLIDER || WELD_HAS_CSOUND || WELD_HAS_FAUST
 #include <dlfcn.h>
 #endif
 
@@ -42,12 +46,20 @@
 #include <SC_WorldOptions.h>
 #endif
 
+#if WELD_HAS_FAUST
+#include <faust/dsp/interpreter-dsp-c.h>
+#endif
+
 #ifndef WELD_RTCMIX_DEFAULT_LIBRARY
 #define WELD_RTCMIX_DEFAULT_LIBRARY ""
 #endif
 
 #ifndef WELD_CSOUND_DEFAULT_LIBRARY
 #define WELD_CSOUND_DEFAULT_LIBRARY ""
+#endif
+
+#ifndef WELD_FAUST_DEFAULT_LIBRARY
+#define WELD_FAUST_DEFAULT_LIBRARY ""
 #endif
 
 #ifndef WELD_SUPERCOLLIDER_DEFAULT_LIBRARY
@@ -161,6 +173,899 @@ public:
 private:
     EmbeddedChucKEngine engine;
 };
+
+#if WELD_HAS_FAUST
+class FaustRuntime final : public EmbeddedLanguageEngine::Runtime
+{
+public:
+    ~FaustRuntime() override
+    {
+        release();
+        unloadApi();
+    }
+
+    bool prepare (double sampleRate, int maximumBlockSize, int inputChannels, int outputChannels) override
+    {
+        const juce::ScopedLock lock (engineLock);
+
+        releaseUnlocked();
+        resetDiagnostics();
+
+        if (sampleRate <= 0.0 || ! std::isfinite (sampleRate))
+        {
+            lastError = "Invalid Faust audio sample rate";
+            return false;
+        }
+
+        if (maximumBlockSize <= 0 || maximumBlockSize > EmbeddedChucKEngine::maximumBlockSizeLimit)
+        {
+            lastError = "Unsupported Faust audio block size";
+            return false;
+        }
+
+        if (inputChannels < 0
+            || inputChannels > EmbeddedChucKEngine::maximumChannelLimit
+            || outputChannels <= 0
+            || outputChannels > EmbeddedChucKEngine::maximumChannelLimit)
+        {
+            lastError = "Unsupported Faust audio channel count";
+            return false;
+        }
+
+        if (! ensureApiLoaded())
+            return false;
+
+        currentSampleRate = sampleRate;
+        maxBlockSize = maximumBlockSize;
+        numInputChannels = inputChannels;
+        numOutputChannels = outputChannels;
+
+        if (! loadProgramUnlocked (getDefaultProgram(), EmbeddedChucKEngine::getDefaultParameterBindings(), true))
+        {
+            releaseUnlocked();
+            return false;
+        }
+
+        ready.store (true, std::memory_order_release);
+        lastError.clear();
+        return true;
+    }
+
+    void release() noexcept override
+    {
+        const juce::ScopedLock lock (engineLock);
+        releaseUnlocked();
+    }
+
+    bool loadProgram (const juce::String& programBody,
+                      const std::vector<EmbeddedLanguageEngine::ParameterBinding>& bindings) override
+    {
+        std::vector<EmbeddedLanguageEngine::ParameterBinding> normalisedBindings = bindings;
+        juce::String validationError;
+
+        if (! validateParameterBindings (normalisedBindings, validationError))
+        {
+            const juce::ScopedLock lock (engineLock);
+            lastError = validationError;
+            programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        const juce::ScopedLock lock (engineLock);
+        if (currentSampleRate <= 0.0 || maxBlockSize <= 0)
+        {
+            lastError = "Cannot load Faust source before the engine is prepared";
+            programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        return loadProgramUnlocked (programBody, normalisedBindings, false);
+    }
+
+    bool loadProgramAsync (const juce::String& programBody,
+                           const std::vector<EmbeddedLanguageEngine::ParameterBinding>& bindings) override
+    {
+        asyncProgramLoadQueuedCount.fetch_add (1, std::memory_order_relaxed);
+        const auto loaded = loadProgram (programBody, bindings);
+        asyncProgramLoadCompletedCount.fetch_add (1, std::memory_order_relaxed);
+        return loaded;
+    }
+
+    bool waitForAsyncProgramLoads (int) override
+    {
+        return true;
+    }
+
+    void process (const juce::AudioBuffer<float>& input, juce::AudioBuffer<float>& output) override
+    {
+        const juce::ScopedTryLock lock (engineLock);
+        output.clear();
+
+        if (! lock.isLocked() || ! ready.load (std::memory_order_acquire) || activeDsp == nullptr)
+        {
+            silentProcessCount.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
+
+        const auto frames = output.getNumSamples();
+        if (frames <= 0)
+            return;
+
+        if (frames > maxBlockSize)
+        {
+            oversizedBlockCount.fetch_add (1, std::memory_order_relaxed);
+            return;
+        }
+
+        pushParameterZones();
+
+        uint64_t sanitisedInBlock = 0;
+        for (int channel = 0; channel < dspInputChannels; ++channel)
+        {
+            auto* dst = inputScratch.getWritePointer (channel);
+            const auto sourceChannel = juce::jmin (channel, juce::jmax (0, input.getNumChannels() - 1));
+
+            for (int frame = 0; frame < frames; ++frame)
+            {
+                const auto sample = input.getNumChannels() > 0 && frame < input.getNumSamples()
+                                      ? input.getSample (sourceChannel, frame)
+                                      : 0.0f;
+
+                if (audioSampleNeedsSanitising (sample))
+                    ++sanitisedInBlock;
+
+                dst[frame] = sanitiseAudioSample (sample);
+            }
+
+            inputPointers[static_cast<size_t> (channel)] = dst;
+        }
+
+        for (int channel = 0; channel < dspOutputChannels; ++channel)
+        {
+            outputScratch.clear (channel, 0, frames);
+            outputPointers[static_cast<size_t> (channel)] = outputScratch.getWritePointer (channel);
+        }
+
+        try
+        {
+            faustApi.compute (activeDsp, frames, inputPointers.data(), outputPointers.data());
+        }
+        catch (...)
+        {
+            renderExceptionCount.fetch_add (1, std::memory_order_relaxed);
+            output.clear();
+            ready.store (false, std::memory_order_release);
+            return;
+        }
+
+        for (int channel = 0; channel < output.getNumChannels(); ++channel)
+        {
+            const auto sourceChannel = dspOutputChannels > 0 ? juce::jmin (channel, dspOutputChannels - 1) : 0;
+            auto* dst = output.getWritePointer (channel);
+            const auto* src = dspOutputChannels > 0 ? outputScratch.getReadPointer (sourceChannel) : nullptr;
+
+            for (int frame = 0; frame < frames; ++frame)
+            {
+                const auto sample = src != nullptr ? src[frame] : 0.0f;
+                if (audioSampleNeedsSanitising (sample))
+                    ++sanitisedInBlock;
+
+                dst[frame] = sanitiseAudioSample (sample);
+            }
+        }
+
+        if (sanitisedInBlock != 0)
+            sanitisedSampleCount.fetch_add (sanitisedInBlock, std::memory_order_relaxed);
+
+        renderedBlockCount.fetch_add (1, std::memory_order_relaxed);
+        renderedFrameCount.fetch_add (static_cast<uint64_t> (frames), std::memory_order_relaxed);
+    }
+
+    juce::String getCurrentProgram() const override
+    {
+        const juce::ScopedLock lock (engineLock);
+        return currentProgram;
+    }
+
+    std::vector<EmbeddedLanguageEngine::ParameterBinding> getCurrentParameterBindings() const override
+    {
+        const juce::ScopedLock lock (engineLock);
+        return currentBindings;
+    }
+
+    bool setParameterValue (int index, float value) noexcept override
+    {
+        const auto count = activeParameterCount.load (std::memory_order_acquire);
+        if (index < 0 || index >= count || index >= EmbeddedChucKEngine::maximumParameterCount)
+            return false;
+
+        const auto& binding = currentBindings[static_cast<size_t> (index)];
+        if (controlValueNeedsSanitising (value, binding.minimumValue, binding.maximumValue))
+            sanitisedControlCount.fetch_add (1, std::memory_order_relaxed);
+
+        parameterValues[static_cast<size_t> (index)].store (sanitiseControlValue (value,
+                                                                                  binding.defaultValue,
+                                                                                  binding.minimumValue,
+                                                                                  binding.maximumValue),
+                                                            std::memory_order_relaxed);
+        return true;
+    }
+
+    bool setParameterValue (const juce::String& name, float value) override
+    {
+        const juce::ScopedLock lock (engineLock);
+        return setParameterValue (getParameterIndexUnlocked (name), value);
+    }
+
+    float getParameterValue (int index) const noexcept override
+    {
+        const auto count = activeParameterCount.load (std::memory_order_acquire);
+        if (index < 0 || index >= count || index >= EmbeddedChucKEngine::maximumParameterCount)
+            return 0.0f;
+
+        return parameterValues[static_cast<size_t> (index)].load (std::memory_order_relaxed);
+    }
+
+    int getParameterIndex (const juce::String& name) const override
+    {
+        const juce::ScopedLock lock (engineLock);
+        return getParameterIndexUnlocked (name);
+    }
+
+    int getParameterCount() const noexcept override { return activeParameterCount.load (std::memory_order_acquire); }
+    bool isReady() const noexcept override { return ready.load (std::memory_order_acquire); }
+
+    juce::String getLastError() const override
+    {
+        const juce::ScopedLock lock (engineLock);
+        return lastError;
+    }
+
+    uint64_t getSilentProcessCount() const noexcept override { return silentProcessCount.load (std::memory_order_relaxed); }
+    uint64_t getOversizedBlockCount() const noexcept override { return oversizedBlockCount.load (std::memory_order_relaxed); }
+    uint64_t getRenderExceptionCount() const noexcept override { return renderExceptionCount.load (std::memory_order_relaxed); }
+    uint64_t getSanitisedSampleCount() const noexcept override { return sanitisedSampleCount.load (std::memory_order_relaxed); }
+    uint64_t getSanitisedControlCount() const noexcept override { return sanitisedControlCount.load (std::memory_order_relaxed); }
+    uint64_t getInternalErrorCount() const noexcept override { return internalErrorCount.load (std::memory_order_relaxed); }
+    uint64_t getRenderedBlockCount() const noexcept override { return renderedBlockCount.load (std::memory_order_relaxed); }
+    uint64_t getRenderedFrameCount() const noexcept override { return renderedFrameCount.load (std::memory_order_relaxed); }
+    uint64_t getProgramLoadSuccessCount() const noexcept override { return programLoadSuccessCount.load (std::memory_order_relaxed); }
+    uint64_t getProgramLoadFailureCount() const noexcept override { return programLoadFailureCount.load (std::memory_order_relaxed); }
+    uint64_t getAsyncProgramLoadQueuedCount() const noexcept override { return asyncProgramLoadQueuedCount.load (std::memory_order_relaxed); }
+    uint64_t getAsyncProgramLoadCompletedCount() const noexcept override { return asyncProgramLoadCompletedCount.load (std::memory_order_relaxed); }
+    uint64_t getAsyncProgramLoadDroppedCount() const noexcept override { return 0; }
+    bool isAsyncProgramLoadActive() const noexcept override { return false; }
+
+private:
+    struct Api
+    {
+        using StartMT = bool (*)();
+        using StopMT = void (*)();
+        using CreateFactory = interpreter_dsp_factory* (*) (const char*, const char*, int, const char**, char*);
+        using DeleteFactory = bool (*) (interpreter_dsp_factory*);
+        using CreateInstance = interpreter_dsp* (*) (interpreter_dsp_factory*);
+        using DeleteInstance = void (*) (interpreter_dsp*);
+        using InitInstance = void (*) (interpreter_dsp*, int);
+        using BuildUserInterface = void (*) (interpreter_dsp*, UIGlue*);
+        using GetNumInputs = int (*) (interpreter_dsp*);
+        using GetNumOutputs = int (*) (interpreter_dsp*);
+        using Compute = void (*) (interpreter_dsp*, int, FAUSTFLOAT**, FAUSTFLOAT**);
+
+        void* libraryHandle = nullptr;
+        juce::String loadedPath;
+        StartMT startMT = nullptr;
+        StopMT stopMT = nullptr;
+        CreateFactory createFactory = nullptr;
+        DeleteFactory deleteFactory = nullptr;
+        CreateInstance createInstance = nullptr;
+        DeleteInstance deleteInstance = nullptr;
+        InitInstance initInstance = nullptr;
+        BuildUserInterface buildUserInterface = nullptr;
+        GetNumInputs getNumInputs = nullptr;
+        GetNumOutputs getNumOutputs = nullptr;
+        Compute compute = nullptr;
+
+        bool isLoaded() const noexcept { return libraryHandle != nullptr; }
+    };
+
+    struct ControlZone
+    {
+        juce::String label;
+        FAUSTFLOAT* zone = nullptr;
+    };
+
+    struct ControlCollector
+    {
+        std::vector<ControlZone>* zones = nullptr;
+    };
+
+    static void ignoreBox (void*, const char*) {}
+    static void ignoreCloseBox (void*) {}
+    static void ignoreDeclare (void*, FAUSTFLOAT*, const char*, const char*) {}
+    static void ignoreSoundfile (void*, const char*, const char*, Soundfile**) {}
+
+    static void addControl (void* userData, const char* label, FAUSTFLOAT* zone)
+    {
+        auto* collector = static_cast<ControlCollector*> (userData);
+        if (collector != nullptr && collector->zones != nullptr && label != nullptr && zone != nullptr)
+            collector->zones->push_back ({ label, zone });
+    }
+
+    static void addSlider (void* userData,
+                           const char* label,
+                           FAUSTFLOAT* zone,
+                           FAUSTFLOAT init,
+                           FAUSTFLOAT,
+                           FAUSTFLOAT,
+                           FAUSTFLOAT)
+    {
+        if (zone != nullptr)
+            *zone = init;
+
+        addControl (userData, label, zone);
+    }
+
+    static void addBargraph (void*, const char*, FAUSTFLOAT*, FAUSTFLOAT, FAUSTFLOAT) {}
+
+    void releaseUnlocked() noexcept
+    {
+        ready.store (false, std::memory_order_release);
+
+        if (faustApi.deleteInstance != nullptr && activeDsp != nullptr)
+            faustApi.deleteInstance (activeDsp);
+        activeDsp = nullptr;
+
+        if (faustApi.deleteFactory != nullptr && activeFactory != nullptr)
+            faustApi.deleteFactory (activeFactory);
+        activeFactory = nullptr;
+
+        currentProgram.clear();
+        currentBindings.clear();
+        controlZones.clear();
+        activeParameterCount.store (0, std::memory_order_release);
+        dspInputChannels = 0;
+        dspOutputChannels = 0;
+        inputScratch.setSize (0, 0);
+        outputScratch.setSize (0, 0);
+    }
+
+    void resetDiagnostics()
+    {
+        silentProcessCount.store (0, std::memory_order_relaxed);
+        oversizedBlockCount.store (0, std::memory_order_relaxed);
+        renderExceptionCount.store (0, std::memory_order_relaxed);
+        sanitisedSampleCount.store (0, std::memory_order_relaxed);
+        sanitisedControlCount.store (0, std::memory_order_relaxed);
+        internalErrorCount.store (0, std::memory_order_relaxed);
+        renderedBlockCount.store (0, std::memory_order_relaxed);
+        renderedFrameCount.store (0, std::memory_order_relaxed);
+        programLoadSuccessCount.store (0, std::memory_order_relaxed);
+        programLoadFailureCount.store (0, std::memory_order_relaxed);
+        asyncProgramLoadQueuedCount.store (0, std::memory_order_relaxed);
+        asyncProgramLoadCompletedCount.store (0, std::memory_order_relaxed);
+    }
+
+    bool ensureApiLoaded()
+    {
+        if (faustApi.isLoaded())
+            return true;
+
+        juce::String symbolError;
+        for (const auto& candidate : getFaustLibraryCandidates())
+        {
+            auto* handle = dlopen (candidate.toRawUTF8(), RTLD_NOW | RTLD_LOCAL);
+            if (handle == nullptr)
+                continue;
+
+            faustApi.libraryHandle = handle;
+            faustApi.loadedPath = candidate;
+
+            if (loadSymbol (faustApi.startMT, "startMTDSPFactories", symbolError)
+                && loadSymbol (faustApi.stopMT, "stopMTDSPFactories", symbolError)
+                && loadSymbol (faustApi.createFactory, "createCInterpreterDSPFactoryFromString", symbolError)
+                && loadSymbol (faustApi.deleteFactory, "deleteCInterpreterDSPFactory", symbolError)
+                && loadSymbol (faustApi.createInstance, "createCInterpreterDSPInstance", symbolError)
+                && loadSymbol (faustApi.deleteInstance, "deleteCInterpreterDSPInstance", symbolError)
+                && loadSymbol (faustApi.initInstance, "initCInterpreterDSPInstance", symbolError)
+                && loadSymbol (faustApi.buildUserInterface, "buildUserInterfaceCInterpreterDSPInstance", symbolError)
+                && loadSymbol (faustApi.getNumInputs, "getNumInputsCInterpreterDSPInstance", symbolError)
+                && loadSymbol (faustApi.getNumOutputs, "getNumOutputsCInterpreterDSPInstance", symbolError)
+                && loadSymbol (faustApi.compute, "computeCInterpreterDSPInstance", symbolError))
+            {
+                const std::lock_guard<std::mutex> lifetimeLock (faustApiLifetimeMutex());
+                if (faustApiUserCount() == 0)
+                    static_cast<void> (faustApi.startMT());
+
+                ++faustApiUserCount();
+                faustApiStarted = true;
+                return true;
+            }
+
+            unloadApi();
+        }
+
+        lastError = "Could not load Faust libfaust runtime";
+        if (symbolError.isNotEmpty())
+            lastError += ": " + symbolError;
+
+        return false;
+    }
+
+    template <typename Function>
+    bool loadSymbol (Function& function, const char* symbolName, juce::String& error)
+    {
+        function = reinterpret_cast<Function> (dlsym (faustApi.libraryHandle, symbolName));
+        if (function != nullptr)
+            return true;
+
+        error = "missing symbol " + juce::String (symbolName);
+        return false;
+    }
+
+    void unloadApi() noexcept
+    {
+        if (faustApiStarted)
+        {
+            const std::lock_guard<std::mutex> lifetimeLock (faustApiLifetimeMutex());
+            if (faustApiUserCount() > 0)
+            {
+                --faustApiUserCount();
+                if (faustApiUserCount() == 0 && faustApi.stopMT != nullptr)
+                    faustApi.stopMT();
+            }
+            faustApiStarted = false;
+        }
+
+        if (faustApi.libraryHandle != nullptr)
+            dlclose (faustApi.libraryHandle);
+
+        faustApi = {};
+    }
+
+    bool loadProgramUnlocked (const juce::String& programBody,
+                              const std::vector<EmbeddedLanguageEngine::ParameterBinding>& bindings,
+                              bool isImplicitDefault)
+    {
+        if (! ensureApiLoaded())
+        {
+            programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        std::array<char, 4096> errorMessage {};
+        auto source = normaliseFaustProgram (programBody);
+        auto arguments = getFaustCompileArguments();
+        std::vector<const char*> argv;
+        argv.reserve (arguments.size());
+        for (const auto& argument : arguments)
+            argv.push_back (argument.toRawUTF8());
+
+        auto* candidateFactory = faustApi.createFactory ("AlchemyFaust",
+                                                         source.toRawUTF8(),
+                                                         static_cast<int> (argv.size()),
+                                                         argv.data(),
+                                                         errorMessage.data());
+        if (candidateFactory == nullptr)
+        {
+            lastError = "Faust compile failed";
+            if (errorMessage[0] != '\0')
+                lastError += ": " + juce::String (errorMessage.data());
+
+            if (! isImplicitDefault)
+                programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        auto* candidateDsp = faustApi.createInstance (candidateFactory);
+        if (candidateDsp == nullptr)
+        {
+            faustApi.deleteFactory (candidateFactory);
+            lastError = "Faust DSP instance creation failed";
+            if (! isImplicitDefault)
+                programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        faustApi.initInstance (candidateDsp, juce::roundToInt (currentSampleRate));
+
+        std::vector<ControlZone> candidateZones;
+        collectControlZones (candidateDsp, candidateZones);
+
+        const auto candidateInputs = juce::jlimit (0,
+                                                   EmbeddedChucKEngine::maximumChannelLimit,
+                                                   faustApi.getNumInputs (candidateDsp));
+        const auto candidateOutputs = juce::jlimit (0,
+                                                    EmbeddedChucKEngine::maximumChannelLimit,
+                                                    faustApi.getNumOutputs (candidateDsp));
+
+        if (candidateOutputs <= 0)
+        {
+            faustApi.deleteInstance (candidateDsp);
+            faustApi.deleteFactory (candidateFactory);
+            lastError = "Faust source has no audio outputs";
+            if (! isImplicitDefault)
+                programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+            return false;
+        }
+
+        if (faustApi.deleteInstance != nullptr && activeDsp != nullptr)
+            faustApi.deleteInstance (activeDsp);
+        if (faustApi.deleteFactory != nullptr && activeFactory != nullptr)
+            faustApi.deleteFactory (activeFactory);
+
+        activeFactory = candidateFactory;
+        activeDsp = candidateDsp;
+        dspInputChannels = candidateInputs;
+        dspOutputChannels = candidateOutputs;
+        controlZones = std::move (candidateZones);
+        currentProgram = programBody;
+        applyParameterSlots (bindings);
+
+        inputScratch.setSize (dspInputChannels, maxBlockSize, false, false, true);
+        outputScratch.setSize (dspOutputChannels, maxBlockSize, false, false, true);
+        inputPointers.assign (static_cast<size_t> (dspInputChannels), nullptr);
+        outputPointers.assign (static_cast<size_t> (dspOutputChannels), nullptr);
+
+        ready.store (true, std::memory_order_release);
+        lastError.clear();
+
+        if (! isImplicitDefault)
+            programLoadSuccessCount.fetch_add (1, std::memory_order_relaxed);
+
+        return true;
+    }
+
+    void collectControlZones (interpreter_dsp* dsp, std::vector<ControlZone>& zones)
+    {
+        ControlCollector collector { &zones };
+        UIGlue glue {};
+        glue.uiInterface = &collector;
+        glue.openTabBox = ignoreBox;
+        glue.openHorizontalBox = ignoreBox;
+        glue.openVerticalBox = ignoreBox;
+        glue.closeBox = ignoreCloseBox;
+        glue.addButton = addControl;
+        glue.addCheckButton = addControl;
+        glue.addVerticalSlider = addSlider;
+        glue.addHorizontalSlider = addSlider;
+        glue.addNumEntry = addSlider;
+        glue.addHorizontalBargraph = addBargraph;
+        glue.addVerticalBargraph = addBargraph;
+        glue.addSoundfile = ignoreSoundfile;
+        glue.declare = ignoreDeclare;
+        faustApi.buildUserInterface (dsp, &glue);
+    }
+
+    void applyParameterSlots (const std::vector<EmbeddedLanguageEngine::ParameterBinding>& bindings)
+    {
+        currentBindings = bindings;
+        if (currentBindings.size() > static_cast<size_t> (EmbeddedChucKEngine::maximumParameterCount))
+            currentBindings.resize (EmbeddedChucKEngine::maximumParameterCount);
+
+        for (size_t i = 0; i < currentBindings.size(); ++i)
+        {
+            const auto& binding = currentBindings[i];
+            parameterValues[i].store (sanitiseControlValue (binding.defaultValue,
+                                                            binding.defaultValue,
+                                                            binding.minimumValue,
+                                                            binding.maximumValue),
+                                      std::memory_order_relaxed);
+        }
+
+        for (size_t i = currentBindings.size(); i < parameterValues.size(); ++i)
+            parameterValues[i].store (0.0f, std::memory_order_relaxed);
+
+        activeParameterCount.store (static_cast<int> (currentBindings.size()), std::memory_order_release);
+        pushParameterZones();
+    }
+
+    void pushParameterZones()
+    {
+        const auto count = activeParameterCount.load (std::memory_order_acquire);
+        for (int i = 0; i < count && i < static_cast<int> (currentBindings.size()); ++i)
+        {
+            auto* zone = findControlZone (currentBindings[static_cast<size_t> (i)].name);
+            if (zone != nullptr)
+                *zone = parameterValues[static_cast<size_t> (i)].load (std::memory_order_relaxed);
+        }
+    }
+
+    FAUSTFLOAT* findControlZone (const juce::String& name) const
+    {
+        for (const auto& zone : controlZones)
+            if (zone.label == name)
+                return zone.zone;
+
+        return nullptr;
+    }
+
+    int getParameterIndexUnlocked (const juce::String& name) const
+    {
+        for (size_t i = 0; i < currentBindings.size(); ++i)
+            if (currentBindings[i].name == name)
+                return static_cast<int> (i);
+
+        return -1;
+    }
+
+    static juce::String normaliseFaustProgram (juce::String source)
+    {
+        source = source.trim();
+        if (source.contains ("process"))
+            return source;
+
+        if (! source.endsWithChar (';'))
+            source += ";";
+
+        return "import(\"stdfaust.lib\");\nprocess = " + source;
+    }
+
+    static juce::String getDefaultProgram()
+    {
+        return R"faust(
+import("stdfaust.lib");
+hostFreq = hslider("hostFreq", 220, 30, 4000, 1);
+hostGain = hslider("hostGain", 0.14, 0, 0.4, 0.001);
+hostBlend = hslider("hostBlend", 0.25, 0, 1, 0.001);
+tone = os.osc(hostFreq) * hostGain;
+bright = fi.highpass(2, 1200 + (hostBlend * 4800), tone) * hostBlend;
+process = tone + bright <: _, _;
+)faust";
+    }
+
+    static std::vector<juce::String> getFaustCompileArguments()
+    {
+        std::vector<juce::String> arguments;
+        const auto libraryPath = getFaustLibraryPath();
+        if (libraryPath.isNotEmpty())
+        {
+            arguments.push_back ("-I");
+            arguments.push_back (libraryPath);
+        }
+
+        return arguments;
+    }
+
+    static juce::String getFaustLibraryPath()
+    {
+        const auto currentExecutable = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+        std::vector<juce::File> starts
+        {
+            juce::File::getCurrentWorkingDirectory(),
+            currentExecutable.getParentDirectory()
+        };
+
+        const auto bundleContents = getBundleContentsDirectory();
+        if (bundleContents != juce::File())
+            starts.push_back (bundleContents.getChildFile ("Resources"));
+
+        for (auto start : starts)
+        {
+            for (int depth = 0; depth < 8 && start.exists(); ++depth)
+            {
+                const auto direct = start.getChildFile ("third_party").getChildFile ("faust").getChildFile ("libraries");
+                if (direct.getChildFile ("stdfaust.lib").existsAsFile())
+                    return direct.getFullPathName();
+
+                const auto local = start.getChildFile ("libraries");
+                if (local.getChildFile ("stdfaust.lib").existsAsFile())
+                    return local.getFullPathName();
+
+                const auto bundled = start.getChildFile ("Faust").getChildFile ("libraries");
+                if (bundled.getChildFile ("stdfaust.lib").existsAsFile())
+                    return bundled.getFullPathName();
+
+                start = start.getParentDirectory();
+            }
+        }
+
+        return {};
+    }
+
+    static bool validateParameterBindings (const std::vector<EmbeddedLanguageEngine::ParameterBinding>& bindings,
+                                           juce::String& error)
+    {
+        if (bindings.size() > static_cast<size_t> (EmbeddedChucKEngine::maximumParameterCount))
+        {
+            error = "Too many Faust parameter bindings";
+            return false;
+        }
+
+        for (size_t i = 0; i < bindings.size(); ++i)
+        {
+            const auto& binding = bindings[i];
+
+            if (! isValidParameterName (binding.name))
+            {
+                error = "Invalid Faust parameter binding name: " + binding.name;
+                return false;
+            }
+
+            if (! std::isfinite (binding.minimumValue)
+                || ! std::isfinite (binding.maximumValue)
+                || ! std::isfinite (binding.defaultValue)
+                || binding.minimumValue > binding.maximumValue
+                || binding.defaultValue < binding.minimumValue
+                || binding.defaultValue > binding.maximumValue)
+            {
+                error = "Invalid range/default for Faust parameter binding: " + binding.name;
+                return false;
+            }
+
+            for (size_t other = i + 1; other < bindings.size(); ++other)
+                if (bindings[other].name == binding.name)
+                {
+                    error = "Duplicate Faust parameter binding name: " + binding.name;
+                    return false;
+                }
+        }
+
+        error.clear();
+        return true;
+    }
+
+    static bool isValidParameterName (const juce::String& name) noexcept
+    {
+        if (name.isEmpty())
+            return false;
+
+        const auto first = static_cast<unsigned char> (name[0]);
+        if (! (std::isalpha (first) || first == '_'))
+            return false;
+
+        for (int i = 1; i < name.length(); ++i)
+        {
+            const auto character = static_cast<unsigned char> (name[i]);
+            if (! (std::isalnum (character) || character == '_'))
+                return false;
+        }
+
+        return true;
+    }
+
+    static bool audioSampleNeedsSanitising (float sample) noexcept
+    {
+        return ! std::isfinite (sample) || sample < -outputSafetyLimit || sample > outputSafetyLimit;
+    }
+
+    static bool controlValueNeedsSanitising (float value, float lower, float upper) noexcept
+    {
+        return ! std::isfinite (value) || value < lower || value > upper;
+    }
+
+    static float sanitiseAudioSample (float sample) noexcept
+    {
+        if (! std::isfinite (sample))
+            return 0.0f;
+
+        return juce::jlimit (-outputSafetyLimit, outputSafetyLimit, sample);
+    }
+
+    static float sanitiseControlValue (float value, float fallback, float lower, float upper) noexcept
+    {
+        if (! std::isfinite (value))
+            return fallback;
+
+        return juce::jlimit (lower, upper, value);
+    }
+
+    static void addLibraryCandidate (juce::StringArray& candidates, const juce::String& path)
+    {
+        if (path.isNotEmpty())
+            candidates.addIfNotAlreadyThere (path);
+    }
+
+    static juce::File getBundleContentsDirectory()
+    {
+        const auto executableDirectory = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+        if (executableDirectory.getFileName() == "MacOS")
+            return executableDirectory.getParentDirectory();
+
+        return {};
+    }
+
+    static void addBundledLibraryCandidate (juce::StringArray& candidates, const juce::String& fileName)
+    {
+        const auto contents = getBundleContentsDirectory();
+        if (contents.exists())
+            addLibraryCandidate (candidates, contents.getChildFile ("Frameworks").getChildFile (fileName).getFullPathName());
+    }
+
+    static juce::StringArray getFaustLibraryCandidates()
+    {
+        juce::StringArray candidates;
+
+        if (const auto* envPath = std::getenv ("WELD_FAUST_LIBRARY"))
+            addLibraryCandidate (candidates, envPath);
+
+        addBundledLibraryCandidate (candidates, "libfaust.dylib");
+        addLibraryCandidate (candidates, WELD_FAUST_DEFAULT_LIBRARY);
+
+        const auto currentExecutable = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+        std::vector<juce::File> starts
+        {
+            juce::File::getCurrentWorkingDirectory(),
+            currentExecutable.getParentDirectory()
+        };
+
+        for (auto start : starts)
+        {
+            for (int depth = 0; depth < 8 && start.exists(); ++depth)
+            {
+                addLibraryCandidate (candidates,
+                                     start.getChildFile ("third_party")
+                                          .getChildFile ("faust")
+                                          .getChildFile ("build")
+                                          .getChildFile ("lib")
+                                          .getChildFile ("libfaust.dylib")
+                                          .getFullPathName());
+                addLibraryCandidate (candidates,
+                                     start.getChildFile ("third_party")
+                                          .getChildFile ("faust")
+                                          .getChildFile ("build")
+                                          .getChildFile ("lib")
+                                          .getChildFile ("libfaust.so")
+                                          .getFullPathName());
+                addLibraryCandidate (candidates, start.getChildFile ("build-faust").getChildFile ("lib").getChildFile ("libfaust.dylib").getFullPathName());
+                addLibraryCandidate (candidates, start.getChildFile ("build-faust").getChildFile ("lib").getChildFile ("libfaust.so").getFullPathName());
+                start = start.getParentDirectory();
+            }
+        }
+
+        addLibraryCandidate (candidates, "libfaust.dylib");
+        addLibraryCandidate (candidates, "libfaust.so");
+        return candidates;
+    }
+
+    static std::mutex& faustApiLifetimeMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    static int& faustApiUserCount()
+    {
+        static int count = 0;
+        return count;
+    }
+
+    juce::CriticalSection engineLock;
+    Api faustApi;
+    interpreter_dsp_factory* activeFactory = nullptr;
+    interpreter_dsp* activeDsp = nullptr;
+    juce::AudioBuffer<float> inputScratch;
+    juce::AudioBuffer<float> outputScratch;
+    std::vector<FAUSTFLOAT*> inputPointers;
+    std::vector<FAUSTFLOAT*> outputPointers;
+    std::vector<ControlZone> controlZones;
+    std::vector<EmbeddedLanguageEngine::ParameterBinding> currentBindings;
+    std::array<std::atomic<float>, EmbeddedChucKEngine::maximumParameterCount> parameterValues {};
+    juce::String currentProgram;
+    juce::String lastError;
+    double currentSampleRate = 0.0;
+    int maxBlockSize = 0;
+    int numInputChannels = 0;
+    int numOutputChannels = 0;
+    int dspInputChannels = 0;
+    int dspOutputChannels = 0;
+    bool faustApiStarted = false;
+    std::atomic<bool> ready { false };
+    std::atomic<int> activeParameterCount { 0 };
+    std::atomic<uint64_t> silentProcessCount { 0 };
+    std::atomic<uint64_t> oversizedBlockCount { 0 };
+    std::atomic<uint64_t> renderExceptionCount { 0 };
+    std::atomic<uint64_t> sanitisedSampleCount { 0 };
+    std::atomic<uint64_t> sanitisedControlCount { 0 };
+    std::atomic<uint64_t> internalErrorCount { 0 };
+    std::atomic<uint64_t> renderedBlockCount { 0 };
+    std::atomic<uint64_t> renderedFrameCount { 0 };
+    std::atomic<uint64_t> programLoadSuccessCount { 0 };
+    std::atomic<uint64_t> programLoadFailureCount { 0 };
+    std::atomic<uint64_t> asyncProgramLoadQueuedCount { 0 };
+    std::atomic<uint64_t> asyncProgramLoadCompletedCount { 0 };
+    static constexpr float outputSafetyLimit = 0.98f;
+};
+#endif
 
 #if WELD_HAS_CSOUND
 class CsoundRuntime final : public EmbeddedLanguageEngine::Runtime
@@ -3553,6 +4458,11 @@ juce::String EmbeddedLanguageEngine::getLanguageBuildStatus (Language languageTo
         return "Csound backend is built in with host-implemented audio I/O, direct spin/spout buffers, and dynamic libcsound loading";
 #endif
 
+#if WELD_HAS_FAUST
+    if (languageToReport == Language::faust)
+        return "Faust backend is built in with libfaust interpreter compilation and host-pulled DSP compute";
+#endif
+
 #if WELD_HAS_SUPERCOLLIDER
     if (languageToReport == Language::supercollider)
         return "SuperCollider backend is built in with embedded libscsynth host-pulled audio and no external server";
@@ -3575,6 +4485,11 @@ bool EmbeddedLanguageEngine::isLanguageBuiltIn (Language languageToCheck) noexce
 
 #if WELD_HAS_CSOUND
     if (languageToCheck == Language::csound)
+        return true;
+#endif
+
+#if WELD_HAS_FAUST
+    if (languageToCheck == Language::faust)
         return true;
 #endif
 
@@ -3689,6 +4604,11 @@ std::unique_ptr<EmbeddedLanguageEngine::Runtime> EmbeddedLanguageEngine::createR
 #if WELD_HAS_CSOUND
     if (languageToCreate == Language::csound)
         return std::make_unique<CsoundRuntime>();
+#endif
+
+#if WELD_HAS_FAUST
+    if (languageToCreate == Language::faust)
+        return std::make_unique<FaustRuntime>();
 #endif
 
 #if WELD_HAS_SUPERCOLLIDER

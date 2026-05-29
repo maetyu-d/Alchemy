@@ -1659,6 +1659,191 @@ stop();
     return 0;
 }
 
+struct LanguageExample
+{
+    EmbeddedLanguageEngine::Language language;
+    const char* name;
+    const char* source;
+};
+
+float renderLanguageExamplePeak (const LanguageExample& example, juce::String& error)
+{
+    constexpr double sampleRate = 48000.0;
+    constexpr int blockSize = 128;
+    constexpr int renderBlocks = 512;
+
+    EmbeddedLanguageEngine engine (example.language);
+    if (! engine.prepare (sampleRate, blockSize, 0, 2))
+    {
+        error = engine.getLastError();
+        return -1.0f;
+    }
+
+    auto bindings = EmbeddedPerformanceEngine::withPerformanceParameterBindings ({});
+    if (! engine.loadProgram (juce::String (example.source), bindings))
+    {
+        error = engine.getLastError();
+        return -1.0f;
+    }
+
+    static_cast<void> (engine.setParameterValue ("hostFreq", 220.0f));
+    static_cast<void> (engine.setParameterValue ("hostGain", 0.16f));
+    static_cast<void> (engine.setParameterValue ("hostBlend", 0.35f));
+    static_cast<void> (engine.setParameterValue ("hostStateGate", 1.0f));
+    static_cast<void> (engine.setParameterValue ("hostStateGain", 1.0f));
+    static_cast<void> (engine.setParameterValue ("hostTempoBpm", 120.0f));
+    static_cast<void> (engine.setParameterValue ("hostTrackGain", 1.0f));
+
+    juce::AudioBuffer<float> input (0, blockSize);
+    juce::AudioBuffer<float> output (2, blockSize);
+    auto peak = 0.0f;
+
+    for (int block = 0; block < renderBlocks; ++block)
+    {
+        output.clear();
+        engine.process (input, output);
+
+        for (int channel = 0; channel < output.getNumChannels(); ++channel)
+            for (int sample = 0; sample < output.getNumSamples(); ++sample)
+            {
+                const auto value = output.getSample (channel, sample);
+                if (! std::isfinite (value))
+                {
+                    error = "rendered a non-finite sample";
+                    return -1.0f;
+                }
+
+                peak = juce::jmax (peak, std::abs (value));
+            }
+    }
+
+    if (engine.getRenderExceptionCount() != 0)
+    {
+        error = "reported render exceptions";
+        return -1.0f;
+    }
+
+    error.clear();
+    return peak;
+}
+
+int runLanguageExampleCompatibilityTest()
+{
+    juce::ScopedNoDenormals noDenormals;
+
+    const LanguageExample examples[]
+    {
+        { EmbeddedLanguageEngine::Language::chuck,
+          "ChucK official-style SinOsc -> dac",
+          R"chuck(
+SinOsc s => Gain g => dac;
+while (true)
+{
+    hostFreq => s.freq;
+    Math.max(0.0, Math.min(hostGain, 0.2)) * hostStateGain * hostTrackGain => g.gain;
+    1::samp => now;
+}
+)chuck" },
+        { EmbeddedLanguageEngine::Language::csound,
+          "Csound ftgen/oscili instrument",
+          R"csound(
+giSine ftgen 1, 0, 4096, 10, 1
+
+instr 1
+    kfreq chnget "hostFreq"
+    kgain chnget "hostGain"
+    kstate chnget "hostStateGain"
+    ktrack chnget "hostTrackGain"
+    a1 oscili kgain * 0.7 * kstate * ktrack, kfreq, giSine
+    outs a1, a1
+endin
+)csound" },
+        { EmbeddedLanguageEngine::Language::faust,
+          "Faust stdfaust oscillator",
+          R"faust(
+import("stdfaust.lib");
+hostFreq = hslider("hostFreq", 220, 30, 4000, 1);
+hostGain = hslider("hostGain", 0.14, 0, 0.4, 0.001);
+hostStateGain = hslider("hostStateGain", 1, 0, 1, 0.001);
+hostTrackGain = hslider("hostTrackGain", 1, 0, 2, 0.001);
+process = os.osc(hostFreq) * hostGain * hostStateGain * hostTrackGain <: _, _;
+)faust" },
+        { EmbeddedLanguageEngine::Language::supercollider,
+          "SuperCollider examples-page drummer function",
+          R"supercollider(
+{ |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,
+   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,
+   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|
+    var snare, bdrum, hihat;
+    var tempo = 4;
+    tempo = Impulse.ar(tempo);
+    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.5));
+    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.5));
+    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005, 0.5);
+    ((snare + bdrum + hihat) * 0.4 * stateGain * trackGain).dup
+}
+)supercollider" },
+        { EmbeddedLanguageEngine::Language::rtcmix,
+          "RTcmix maketable/WAVETABLE score",
+          R"rtcmix(
+bus_config("WAVETABLE", "out 0-1")
+freq = makeconnection("inlet", 1, 220)
+gain = makeconnection("inlet", 2, 0.08)
+stategain = makeconnection("inlet", 5, 1.0)
+trackgain = makeconnection("inlet", 14, 1.0)
+env = maketable("line", 1000, 0,0, 0.01,1, 1,1)
+wave = maketable("wave", 4000, 1, 0.5, 0.25)
+WAVETABLE(0, 4.0, gain * stategain * trackgain * 32767.0 * env, freq, 0.5, wave)
+)rtcmix" }
+    };
+
+    auto tested = 0;
+    for (const auto& example : examples)
+    {
+        const auto languageName = EmbeddedLanguageEngine::getLanguageName (example.language);
+        if (! EmbeddedLanguageEngine::isLanguageBuiltIn (example.language))
+        {
+            juce::Logger::writeToLog ("Language-example test skipped "
+                                      + languageName
+                                      + ": "
+                                      + EmbeddedLanguageEngine::getLanguageBuildStatus (example.language));
+            continue;
+        }
+
+        juce::String error;
+        const auto peak = renderLanguageExamplePeak (example, error);
+        if (peak < 0.001f)
+        {
+            juce::Logger::writeToLog ("Language-example test failed for "
+                                      + languageName
+                                      + " ("
+                                      + example.name
+                                      + "): peak="
+                                      + juce::String (peak)
+                                      + " error="
+                                      + error);
+            return 230 + tested;
+        }
+
+        ++tested;
+        juce::Logger::writeToLog ("Language-example test passed for "
+                                  + languageName
+                                  + " ("
+                                  + example.name
+                                  + "): peak="
+                                  + juce::String (peak));
+    }
+
+    if (tested == 0)
+    {
+        juce::Logger::writeToLog ("Language-example test failed: no built-in language backends were available");
+        return 239;
+    }
+
+    juce::Logger::writeToLog ("Language-example test passed: tested=" + juce::String (tested));
+    return 0;
+}
+
 int runBoundaryTest()
 {
     juce::ScopedNoDenormals noDenormals;
@@ -2137,6 +2322,9 @@ int main (int argc, char* argv[])
 
     if (hasArgument (argc, argv, "--score-script-test"))
         return runScoreScriptTest();
+
+    if (hasArgument (argc, argv, "--language-example-test"))
+        return runLanguageExampleCompatibilityTest();
 
     if (hasArgument (argc, argv, "--boundary-test"))
         return runBoundaryTest();

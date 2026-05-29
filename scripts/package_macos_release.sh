@@ -66,6 +66,11 @@ if [[ -d "$ROOT/build-supercollider-host/server/plugins" ]]; then
     echo "bundled: SuperCollider plugins -> Contents/Resources/SuperCollider/plugins" >> "$STAGE/DEPENDENCY-MANIFEST.txt"
 fi
 
+if [[ -d "$ROOT/third_party/supercollider/SCClassLibrary" ]]; then
+    ditto "$ROOT/third_party/supercollider/SCClassLibrary" "$RESOURCES/SuperCollider/SCClassLibrary"
+    echo "bundled: SuperCollider SCClassLibrary -> Contents/Resources/SuperCollider/SCClassLibrary" >> "$STAGE/DEPENDENCY-MANIFEST.txt"
+fi
+
 if [[ -d "$ROOT/third_party/faust/libraries" ]]; then
     ditto "$ROOT/third_party/faust/libraries" "$RESOURCES/Faust/libraries"
     echo "bundled: Faust libraries -> Contents/Resources/Faust/libraries" >> "$STAGE/DEPENDENCY-MANIFEST.txt"

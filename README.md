@@ -110,7 +110,7 @@ For a repeatable macOS release zip:
 scripts/package_macos_release.sh 0.1.1
 ```
 
-The package script rebuilds the GUI, copies the example projects, copies any local optional Csound/RTcmix/SuperCollider runtime libraries it can find into `Alchemy.app/Contents/Frameworks`, writes a dependency manifest, and creates `dist/Alchemy-v<version>-macOS.zip`.
+The package script rebuilds the GUI, copies the example projects, copies any local optional Csound/RTcmix/SuperCollider runtime libraries it can find into `Alchemy.app/Contents/Frameworks`, bundles the SuperCollider class library and Faust standard libraries when present, writes a dependency manifest, and creates `dist/Alchemy-v<version>-macOS.zip`.
 
 To check that embedded language backends can run representative online/manual-style examples:
 
@@ -118,7 +118,19 @@ To check that embedded language backends can run representative online/manual-st
 build/Alchemy_artefacts/Release/Alchemy --language-example-test
 ```
 
-This renders ChucK, Faust, Csound, SuperCollider, and RTcmix examples through the actual in-process backends and checks for finite, non-silent output. Languages that are declared but not built into the current binary are reported as skipped. SuperCollider examples from `supercollider.github.io/examples` that use `{ ... }.play` should be pasted into Alchemy as the function body only, returning the audio signal; Alchemy owns the synth lifetime and output routing.
+This renders a small compatibility corpus for ChucK, Faust, Csound, SuperCollider, and RTcmix through the actual in-process backends and checks for finite, non-silent output. The corpus is adapted from the official/manual examples and references for ChucK UGens, Faust `stdfaust.lib`, Csound opcodes, SuperCollider example functions, and RTcmix instruments/PFields:
+
+- https://chuck.stanford.edu/doc/examples/
+- https://chuck.cs.princeton.edu/doc/program/ugen.html
+- https://faustlibraries.grame.fr/standardFunctions/
+- https://faustlibraries.grame.fr/libs/oscillators/
+- https://csound.com/docs/manual/
+- https://supercollider.github.io/examples
+- https://rtcmix.org/reference/instruments/WAVETABLE.html
+- https://rtcmix.org/reference/instruments/FMINST.html
+- https://rtcmix.org/reference/instruments/AMINST.html
+
+Languages that are declared but not built into the current binary are reported as skipped. SuperCollider examples from `supercollider.github.io/examples` that use `{ ... }.play` should be pasted into Alchemy as the function body only, returning the audio signal; Alchemy owns the synth lifetime and output routing.
 
 The score VM exposes `score`, `state`, and `track` APIs inside ChucK. String arguments are marshalled to the host bridge, while timing, loops, functions, and conditionals are ordinary ChucK:
 

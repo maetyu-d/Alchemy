@@ -70,6 +70,10 @@
 #define WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY ""
 #endif
 
+#ifndef WELD_SUPERCOLLIDER_DEFAULT_ROOT
+#define WELD_SUPERCOLLIDER_DEFAULT_ROOT ""
+#endif
+
 class EmbeddedLanguageEngine::Runtime
 {
 public:
@@ -3736,6 +3740,35 @@ private:
         CompileSynthDefFn compileSynthDef = nullptr;
     };
 
+    struct SharedLanguageApiState
+    {
+        std::mutex mutex;
+        LanguageApi api;
+        bool shutdownRegistered = false;
+    };
+
+    static SharedLanguageApiState& getSharedLanguageApiState()
+    {
+        static SharedLanguageApiState state;
+        return state;
+    }
+
+    static void shutdownSharedLanguageApiAtExit()
+    {
+        auto& shared = getSharedLanguageApiState();
+        std::lock_guard<std::mutex> lock (shared.mutex);
+
+        if (shared.api.shutdown != nullptr)
+        {
+            try { shared.api.shutdown(); } catch (...) {}
+        }
+
+        if (shared.api.libraryHandle != nullptr)
+            dlclose (shared.api.libraryHandle);
+
+        shared.api = {};
+    }
+
     bool ensureApiLoaded()
     {
         if (scApi.isLoaded())
@@ -3809,6 +3842,14 @@ private:
         if (langApi.isLoaded())
             return true;
 
+        auto& shared = getSharedLanguageApiState();
+        std::lock_guard<std::mutex> sharedLock (shared.mutex);
+        if (shared.api.isLoaded())
+        {
+            langApi = shared.api;
+            return true;
+        }
+
         juce::String loadErrors;
         for (const auto& candidate : getSuperColliderLanguageLibraryCandidates())
         {
@@ -3821,27 +3862,39 @@ private:
                 continue;
             }
 
-            langApi.libraryHandle = handle;
+            LanguageApi candidateApi;
+            candidateApi.libraryHandle = handle;
             juce::String symbolError;
-            const auto symbolsLoaded = loadSymbolFrom (handle, langApi.initialise, "WeldSCLang_Initialise", symbolError)
-                                       && loadSymbolFrom (handle, langApi.shutdown, "WeldSCLang_Shutdown", symbolError)
-                                       && loadSymbolFrom (handle, langApi.compileSynthDef, "WeldSCLang_CompileSynthDef", symbolError);
+            const auto symbolsLoaded = loadSymbolFrom (handle, candidateApi.initialise, "WeldSCLang_Initialise", symbolError)
+                                       && loadSymbolFrom (handle, candidateApi.shutdown, "WeldSCLang_Shutdown", symbolError)
+                                       && loadSymbolFrom (handle, candidateApi.compileSynthDef, "WeldSCLang_CompileSynthDef", symbolError);
 
             if (symbolsLoaded)
             {
                 std::array<char, 4096> errorBuffer {};
                 const auto runtimeRoot = getSuperColliderSourceRoot();
-                if (langApi.initialise (runtimeRoot.toRawUTF8(), errorBuffer.data(), static_cast<int> (errorBuffer.size())))
+                if (candidateApi.initialise (runtimeRoot.toRawUTF8(), errorBuffer.data(), static_cast<int> (errorBuffer.size())))
+                {
+                    shared.api = candidateApi;
+                    if (! shared.shutdownRegistered)
+                    {
+                        std::atexit (shutdownSharedLanguageApiAtExit);
+                        shared.shutdownRegistered = true;
+                    }
+                    langApi = shared.api;
                     return true;
+                }
 
                 loadErrors << "\n" << candidate << ": " << errorBuffer.data();
+                if (candidateApi.shutdown != nullptr)
+                    candidateApi.shutdown();
             }
             else
             {
                 loadErrors << "\n" << candidate << ": " << symbolError;
             }
 
-            unloadLanguageApi();
+            dlclose (handle);
         }
 
         lastError = "Could not load the embedded SuperCollider language compiler";
@@ -3885,14 +3938,8 @@ private:
 
     void unloadLanguageApi() noexcept
     {
-        if (langApi.shutdown != nullptr)
-        {
-            try { langApi.shutdown(); } catch (...) {}
-        }
-
-        if (langApi.libraryHandle != nullptr)
-            dlclose (langApi.libraryHandle);
-
+        // The embedded sclang runtime is process-global and is not safely restartable after shutdown.
+        // Keep the compiler library resident once loaded, and let each audio runtime drop its local copy.
         langApi = {};
     }
 
@@ -4203,6 +4250,18 @@ private:
     {
         if (const auto* envPath = std::getenv ("WELD_SUPERCOLLIDER_ROOT"))
             return envPath;
+
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+        {
+            const auto bundledRoot = contents.getChildFile ("Resources")
+                                     .getChildFile ("SuperCollider");
+            if (bundledRoot.getChildFile ("SCClassLibrary").isDirectory())
+                return bundledRoot.getFullPathName();
+        }
+
+        if (juce::String (WELD_SUPERCOLLIDER_DEFAULT_ROOT).isNotEmpty())
+            return WELD_SUPERCOLLIDER_DEFAULT_ROOT;
 
         return juce::File::getCurrentWorkingDirectory()
             .getChildFile ("third_party")

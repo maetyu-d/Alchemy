@@ -1663,6 +1663,7 @@ struct LanguageExample
 {
     EmbeddedLanguageEngine::Language language;
     const char* name;
+    const char* sourceUrl;
     const char* source;
 };
 
@@ -1735,6 +1736,7 @@ int runLanguageExampleCompatibilityTest()
     {
         { EmbeddedLanguageEngine::Language::chuck,
           "ChucK official-style SinOsc -> dac",
+          "https://chuck.stanford.edu/doc/examples/",
           R"chuck(
 SinOsc s => Gain g => dac;
 while (true)
@@ -1744,8 +1746,34 @@ while (true)
     1::samp => now;
 }
 )chuck" },
+        { EmbeddedLanguageEngine::Language::chuck,
+          "ChucK SawOsc through LPF",
+          "https://chuck.cs.princeton.edu/doc/program/ugen.html",
+          R"chuck(
+SawOsc saw => LPF filt => Gain g => dac;
+while (true)
+{
+    hostFreq * 0.5 => saw.freq;
+    220.0 + (hostFreq * (4.0 + (hostBlend * 8.0))) => filt.freq;
+    Math.max(0.0, Math.min(hostGain, 0.16)) * 0.75 * hostStateGain * hostTrackGain => g.gain;
+    1::samp => now;
+}
+)chuck" },
+        { EmbeddedLanguageEngine::Language::chuck,
+          "ChucK Noise through LPF",
+          "https://chuck.cs.princeton.edu/doc/program/ugen.html",
+          R"chuck(
+Noise n => LPF filt => Gain g => dac;
+while (true)
+{
+    150.0 + (hostFreq * (1.5 + (hostBlend * 6.0))) => filt.freq;
+    Math.max(0.0, Math.min(hostGain, 0.12)) * 0.28 * hostStateGain * hostTrackGain => g.gain;
+    1::samp => now;
+}
+)chuck" },
         { EmbeddedLanguageEngine::Language::csound,
           "Csound ftgen/oscili instrument",
+          "https://csound.com/docs/manual/oscili.html",
           R"csound(
 giSine ftgen 1, 0, 4096, 10, 1
 
@@ -1758,8 +1786,42 @@ instr 1
     outs a1, a1
 endin
 )csound" },
+        { EmbeddedLanguageEngine::Language::csound,
+          "Csound vco2 through tone",
+          "https://csound.com/docs/manual/vco2.html",
+          R"csound(
+instr 1
+    kfreq chnget "hostFreq"
+    kgain chnget "hostGain"
+    kblend chnget "hostBlend"
+    kstate chnget "hostStateGain"
+    ktrack chnget "hostTrackGain"
+    asaw vco2 kgain * 0.32 * kstate * ktrack, kfreq * 0.5, 0
+    afilt tone asaw, 220 + (kfreq * (4 + (kblend * 10)))
+    outs afilt, afilt
+endin
+)csound" },
+        { EmbeddedLanguageEngine::Language::csound,
+          "Csound rand-modulated oscili",
+          "https://csound.com/docs/manual/rand.html",
+          R"csound(
+giSine ftgen 1, 0, 4096, 10, 1
+
+instr 1
+    kfreq chnget "hostFreq"
+    kgain chnget "hostGain"
+    kstate chnget "hostStateGain"
+    ktrack chnget "hostTrackGain"
+    krnd rand kfreq * 0.08, 0.25
+    acar oscili kgain * 0.38 * kstate * ktrack, kfreq + krnd, giSine
+    anoise rand kgain * 0.08 * kstate * ktrack, 0.5
+    afilt tone anoise, kfreq * 5
+    outs acar + afilt, acar - afilt
+endin
+)csound" },
         { EmbeddedLanguageEngine::Language::faust,
           "Faust stdfaust oscillator",
+          "https://faustlibraries.grame.fr/standardFunctions/",
           R"faust(
 import("stdfaust.lib");
 hostFreq = hslider("hostFreq", 220, 30, 4000, 1);
@@ -1768,8 +1830,34 @@ hostStateGain = hslider("hostStateGain", 1, 0, 1, 0.001);
 hostTrackGain = hslider("hostTrackGain", 1, 0, 2, 0.001);
 process = os.osc(hostFreq) * hostGain * hostStateGain * hostTrackGain <: _, _;
 )faust" },
+        { EmbeddedLanguageEngine::Language::faust,
+          "Faust sawtooth through lowpass",
+          "https://faustlibraries.grame.fr/libs/oscillators/",
+          R"faust(
+import("stdfaust.lib");
+hostFreq = hslider("hostFreq", 220, 30, 4000, 1);
+hostGain = hslider("hostGain", 0.14, 0, 0.4, 0.001);
+hostBlend = hslider("hostBlend", 0.35, 0, 1, 0.001);
+hostStateGain = hslider("hostStateGain", 1, 0, 1, 0.001);
+hostTrackGain = hslider("hostTrackGain", 1, 0, 2, 0.001);
+cutoff = 220 + (hostFreq * (4 + (hostBlend * 8)));
+tone = os.sawtooth(hostFreq * 0.5) : fi.lowpass(3, cutoff);
+process = tone * hostGain * 0.42 * hostStateGain * hostTrackGain <: _, _;
+)faust" },
+        { EmbeddedLanguageEngine::Language::faust,
+          "Faust filtered noise",
+          "https://faustlibraries.grame.fr/standardFunctions/",
+          R"faust(
+import("stdfaust.lib");
+hostFreq = hslider("hostFreq", 220, 30, 4000, 1);
+hostGain = hslider("hostGain", 0.14, 0, 0.4, 0.001);
+hostStateGain = hslider("hostStateGain", 1, 0, 1, 0.001);
+hostTrackGain = hslider("hostTrackGain", 1, 0, 2, 0.001);
+process = (no.noise : fi.lowpass(2, 600 + (hostFreq * 3))) * hostGain * 0.10 * hostStateGain * hostTrackGain <: _, _;
+)faust" },
         { EmbeddedLanguageEngine::Language::supercollider,
           "SuperCollider examples-page drummer function",
+          "https://supercollider.github.io/examples",
           R"supercollider(
 { |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,
    stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,
@@ -1783,8 +1871,35 @@ process = os.osc(hostFreq) * hostGain * hostStateGain * hostTrackGain <: _, _;
     ((snare + bdrum + hihat) * 0.4 * stateGain * trackGain).dup
 }
 )supercollider" },
+        { EmbeddedLanguageEngine::Language::supercollider,
+          "SuperCollider simple FM function",
+          "https://supercollider.github.io/examples",
+          R"supercollider(
+{ |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,
+   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,
+   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|
+    var mod, sig;
+    mod = SinOsc.kr([1, 3]).exprange(freq * 0.5, freq * (2 + (blend * 4)));
+    sig = SinOsc.ar(mod, 0, gain * 0.42 * stateGain * trackGain);
+    sig
+}
+)supercollider" },
+        { EmbeddedLanguageEngine::Language::supercollider,
+          "SuperCollider pulse through RLPF",
+          "https://docs.supercollider.online/",
+          R"supercollider(
+{ |freq = 440, gain = 0.14, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,
+   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,
+   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|
+    var pulse, cutoff;
+    pulse = Pulse.ar(freq * [0.5, 0.505], 0.35);
+    cutoff = SinOsc.kr(0.35).range(freq * 2, freq * (6 + (blend * 8)));
+    RLPF.ar(pulse, cutoff, 0.25) * gain * 0.32 * stateGain * trackGain
+}
+)supercollider" },
         { EmbeddedLanguageEngine::Language::rtcmix,
           "RTcmix maketable/WAVETABLE score",
+          "https://rtcmix.org/reference/instruments/WAVETABLE.html",
           R"rtcmix(
 bus_config("WAVETABLE", "out 0-1")
 freq = makeconnection("inlet", 1, 220)
@@ -1794,6 +1909,35 @@ trackgain = makeconnection("inlet", 14, 1.0)
 env = maketable("line", 1000, 0,0, 0.01,1, 1,1)
 wave = maketable("wave", 4000, 1, 0.5, 0.25)
 WAVETABLE(0, 4.0, gain * stategain * trackgain * 32767.0 * env, freq, 0.5, wave)
+)rtcmix" },
+        { EmbeddedLanguageEngine::Language::rtcmix,
+          "RTcmix FMINST score",
+          "https://rtcmix.org/reference/instruments/FMINST.html",
+          R"rtcmix(
+bus_config("FMINST", "out 0-1")
+freq = makeconnection("inlet", 1, 220)
+gain = makeconnection("inlet", 2, 0.08)
+stategain = makeconnection("inlet", 5, 1.0)
+trackgain = makeconnection("inlet", 14, 1.0)
+env = maketable("line", 1000, 0,0.4, 0.01,1, 4,0.9)
+guide = maketable("line", "nonorm", 1000, 0,0, 1,1, 4,0.25)
+wave = maketable("wave", 1000, "sine")
+FMINST(0, 4.0, gain * stategain * trackgain * 32767.0 * env, freq, freq * 1.5, 0, 5, 0.5, wave, guide)
+)rtcmix" },
+        { EmbeddedLanguageEngine::Language::rtcmix,
+          "RTcmix AMINST score",
+          "https://rtcmix.org/reference/instruments/AMINST.html",
+          R"rtcmix(
+bus_config("AMINST", "out 0-1")
+freq = makeconnection("inlet", 1, 220)
+gain = makeconnection("inlet", 2, 0.08)
+stategain = makeconnection("inlet", 5, 1.0)
+trackgain = makeconnection("inlet", 14, 1.0)
+env = maketable("line", 1000, 0,0.5, 0.01,1, 4,0.8)
+modenv = maketable("line", 1000, 0,0.2, 0.4,1, 4,0.4)
+carwave = maketable("wave", 1000, 1, 0.45, 0.2)
+modwave = maketable("wave", 1000, 1)
+AMINST(0, 4.0, gain * stategain * trackgain * 32767.0 * env, 220, freq * 2.0, 0.5, modenv, carwave, modwave)
 )rtcmix" }
     };
 
@@ -1818,6 +1962,8 @@ WAVETABLE(0, 4.0, gain * stategain * trackgain * 32767.0 * env, freq, 0.5, wave)
                                       + languageName
                                       + " ("
                                       + example.name
+                                      + ", source "
+                                      + example.sourceUrl
                                       + "): peak="
                                       + juce::String (peak)
                                       + " error="
@@ -1830,6 +1976,8 @@ WAVETABLE(0, 4.0, gain * stategain * trackgain * 32767.0 * env, freq, 0.5, wave)
                                   + languageName
                                   + " ("
                                   + example.name
+                                  + ", source "
+                                  + example.sourceUrl
                                   + "): peak="
                                   + juce::String (peak));
     }

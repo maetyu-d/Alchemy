@@ -10,6 +10,8 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <random>
@@ -1157,6 +1159,74 @@ ProjectModel makeInitialProject()
         processor.processorEnabled = false;
     }
     arrangeStatesAsFiniteStateMachine (project);
+    project.arrangementOrder = defaultArrangementOrder (project);
+    return project;
+}
+
+ProjectModel makeWavExportTestProject()
+{
+    ProjectModel project;
+    project.globalTempoBpm = 240.0;
+    project.globalTimeSigNumerator = 4;
+    project.globalTimeSigDenominator = 4;
+    project.chuckScoreScript = "score.clear();\ntempo(240);\nmeter(4, 4);\n";
+
+    const auto makeExportState = [] (juce::String name, Language language, juce::String code, int index)
+    {
+        StateModel state;
+        state.name = std::move (name);
+        state.durationBeats = 1.0;
+        state.tailBeats = 0.0;
+        state.canvasX = 70 + (index * 170);
+        state.canvasY = index % 2 == 0 ? 120 : 220;
+        state.tracks.push_back (makeDemoTrack (state.name + " tone", language, 0.45f, std::move (code)));
+        return state;
+    };
+
+    project.states.push_back (makeExportState ("ChucK state",
+                                               Language::chuck,
+                                               "SinOsc s => Gain g => dac;\n"
+                                               "330 => s.freq;\n"
+                                               "while (true) {\n"
+                                               "    0.12 * hostStateGain * hostTrackGain => g.gain;\n"
+                                               "    1::samp => now;\n"
+                                               "}\n",
+                                               0));
+    project.states.push_back (makeExportState ("Csound state",
+                                               Language::csound,
+                                               "giSine ftgen 1, 0, 4096, 10, 1\n"
+                                               "\n"
+                                               "instr 1\n"
+                                               "    kstate chnget \"hostStateGain\"\n"
+                                               "    ktrack chnget \"hostTrackGain\"\n"
+                                               "    a1 oscili 0.12 * kstate * ktrack, 440, giSine\n"
+                                               "    outs a1, a1\n"
+                                               "endin\n",
+                                               1));
+    project.states.push_back (makeExportState ("Faust state",
+                                               Language::faust,
+                                               "import(\"stdfaust.lib\");\n"
+                                               "hostStateGain = hslider(\"hostStateGain\", 1, 0, 1, 0.001);\n"
+                                               "hostTrackGain = hslider(\"hostTrackGain\", 1, 0, 2, 0.001);\n"
+                                               "process = os.osc(550) * 0.12 * hostStateGain * hostTrackGain <: _, _;\n",
+                                               2));
+    project.states.push_back (makeExportState ("SC state",
+                                               Language::supercollider,
+                                               "{ |freq = 440, gain = 0.12, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 240,\n"
+                                               "   stateBeat = 0, globalBeat = 0, timeSigNumerator = 4, timeSigDenominator = 4,\n"
+                                               "   barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n"
+                                               "    SinOsc.ar([660, 661], 0, 0.12 * stateGain * trackGain)\n"
+                                               "}\n",
+                                               3));
+    project.states.push_back (makeExportState ("RTcmix state",
+                                               Language::rtcmix,
+                                               "bus_config(\"WAVETABLE\", \"out 0-1\")\n"
+                                               "stategain = makeconnection(\"inlet\", 5, 1.0)\n"
+                                               "trackgain = makeconnection(\"inlet\", 14, 1.0)\n"
+                                               "wave = maketable(\"wave\", 1024, \"sine\")\n"
+                                               "WAVETABLE(0, 2.0, 0.12 * stategain * trackgain * 32767.0, 770, 0.5, wave)\n",
+                                               4));
+
     project.arrangementOrder = defaultArrangementOrder (project);
     return project;
 }
@@ -3977,6 +4047,137 @@ public:
 #endif
     }
 
+    bool runWavExportRegressionTest (const juce::File& folder, juce::String& error)
+    {
+        if (folder == juce::File())
+        {
+            error = "No WAV export test folder was provided";
+            return false;
+        }
+
+        stopTimer();
+        stopPlayback();
+        project = makeWavExportTestProject();
+        project.masterProcessors[0] = makeTrack ("Master trim", Language::chuck);
+        project.masterProcessors[0].processorLanguage = Language::chuck;
+        project.masterProcessors[0].processorCode = "adc => Gain g => dac;\n0.85 => g.gain;\nwhile (true) { 1::samp => now; }\n";
+        project.masterProcessors[0].processorEnabled = true;
+
+        if (! folder.createDirectory())
+        {
+            error = "Could not create WAV export test folder: " + folder.getFullPathName();
+            return false;
+        }
+
+        for (const auto& oldWav : folder.findChildFiles (juce::File::findFiles, false, "*.wav"))
+            oldWav.deleteFile();
+
+        WavExportOptions options;
+        options.target = WavExportOptions::Target::stemsAndMaster;
+        options.sampleRate = 48000;
+        options.channels = 2;
+        options.bitDepth = WavExportOptions::BitDepth::pcm24;
+        options.naming = WavExportOptions::Naming::numbered;
+        options.headroomDb = -3.0f;
+        options.includeTails = false;
+        options.respectMutes = true;
+
+        const auto result = exportStemsToFolderInternal (folder, options);
+        if (result.failed > 0)
+        {
+            error = "WAV export test had failed renders: " + result.failures.joinIntoString ("; ");
+            return false;
+        }
+
+        if (result.exported != 6)
+        {
+            error = "Expected 6 WAV files from all-language stem export, got " + juce::String (result.exported);
+            return false;
+        }
+
+        const auto expectedFrames = static_cast<int64_t> (std::llround ((5.0 * 60.0 / project.globalTempoBpm) * options.sampleRate));
+        auto exportedFiles = folder.findChildFiles (juce::File::findFiles, false, "*.wav");
+        if (exportedFiles.size() != 6)
+        {
+            error = "Expected 6 WAV files on disk, found " + juce::String (exportedFiles.size());
+            return false;
+        }
+
+        for (const auto& file : exportedFiles)
+        {
+            WavFileInfo info;
+            if (! readWavFileInfo (file, info, error))
+                return false;
+
+            if (info.sampleRate != options.sampleRate || info.channels != 2 || info.bitsPerSample != 24 || info.audioFormat != 1)
+            {
+                error = "Unexpected WAV format in " + file.getFileName();
+                return false;
+            }
+
+            if (info.frames != expectedFrames)
+            {
+                error = "Unexpected frame count in " + file.getFileName() + ": " + juce::String (info.frames);
+                return false;
+            }
+
+            if (info.peak < 0.0001f)
+            {
+                error = "Exported WAV was silent: " + file.getFileName();
+                return false;
+            }
+        }
+
+        struct FormatCase
+        {
+            WavExportOptions::BitDepth bitDepth;
+            int channels;
+            int expectedFormat;
+            int expectedBits;
+            const char* fileName;
+        };
+
+        const FormatCase formatCases[]
+        {
+            { WavExportOptions::BitDepth::float32, 2, 3, 32, "format_float32_stereo.wav" },
+            { WavExportOptions::BitDepth::pcm24, 2, 1, 24, "format_pcm24_stereo.wav" },
+            { WavExportOptions::BitDepth::pcm16, 1, 1, 16, "format_pcm16_mono.wav" }
+        };
+
+        for (const auto& formatCase : formatCases)
+        {
+            auto formatOptions = options;
+            formatOptions.target = WavExportOptions::Target::masterMix;
+            formatOptions.bitDepth = formatCase.bitDepth;
+            formatOptions.channels = formatCase.channels;
+            formatOptions.headroomDb = -6.0f;
+
+            const auto file = folder.getChildFile (formatCase.fileName);
+            if (! renderMasterMixToFile (file, formatOptions))
+            {
+                error = "Could not render WAV format test file: " + file.getFileName();
+                return false;
+            }
+
+            WavFileInfo info;
+            if (! readWavFileInfo (file, info, error))
+                return false;
+
+            if (info.sampleRate != formatOptions.sampleRate
+                || info.channels != formatCase.channels
+                || info.audioFormat != formatCase.expectedFormat
+                || info.bitsPerSample != formatCase.expectedBits
+                || info.frames != expectedFrames
+                || info.peak < 0.0001f)
+            {
+                error = "WAV format validation failed for " + file.getFileName();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     void resized() override
     {
         auto area = getLocalBounds();
@@ -4182,6 +4383,23 @@ private:
         Naming naming = Naming::numbered;
         bool includeTails = true;
         bool respectMutes = true;
+    };
+
+    struct WavExportResult
+    {
+        int exported = 0;
+        int failed = 0;
+        juce::StringArray failures;
+    };
+
+    struct WavFileInfo
+    {
+        int audioFormat = 0;
+        int channels = 0;
+        int sampleRate = 0;
+        int bitsPerSample = 0;
+        int64_t frames = 0;
+        float peak = 0.0f;
     };
 
     void notifyDocumentState()
@@ -4430,6 +4648,129 @@ private:
         }
     }
 
+    static bool chunkIdEquals (const char (&chunkId)[4], const char* expected) noexcept
+    {
+        return chunkId[0] == expected[0]
+            && chunkId[1] == expected[1]
+            && chunkId[2] == expected[2]
+            && chunkId[3] == expected[3];
+    }
+
+    static bool readChunkId (juce::InputStream& input, char (&chunkId)[4])
+    {
+        return input.read (chunkId, 4) == 4;
+    }
+
+    static float readInt24Sample (juce::InputStream& input)
+    {
+        unsigned char bytes[3] {};
+        if (input.read (bytes, 3) != 3)
+            return 0.0f;
+
+        auto value = static_cast<int> (bytes[0])
+                   | (static_cast<int> (bytes[1]) << 8)
+                   | (static_cast<int> (bytes[2]) << 16);
+        if ((value & 0x800000) != 0)
+            value |= ~0xffffff;
+
+        return static_cast<float> (value) / 8388608.0f;
+    }
+
+    static bool readWavFileInfo (const juce::File& file, WavFileInfo& info, juce::String& error)
+    {
+        std::unique_ptr<juce::FileInputStream> input (file.createInputStream());
+        if (input == nullptr || ! input->openedOk())
+        {
+            error = "Could not open exported WAV: " + file.getFullPathName();
+            return false;
+        }
+
+        char riff[4] {};
+        char wave[4] {};
+        if (! readChunkId (*input, riff) || ! chunkIdEquals (riff, "RIFF"))
+        {
+            error = "Missing RIFF header in " + file.getFileName();
+            return false;
+        }
+
+        static_cast<void> (input->readInt());
+        if (! readChunkId (*input, wave) || ! chunkIdEquals (wave, "WAVE"))
+        {
+            error = "Missing WAVE header in " + file.getFileName();
+            return false;
+        }
+
+        int64_t dataStart = -1;
+        int64_t dataBytes = 0;
+        auto blockAlign = 0;
+
+        while (! input->isExhausted())
+        {
+            char chunkId[4] {};
+            if (! readChunkId (*input, chunkId))
+                break;
+
+            const auto chunkSize = static_cast<uint32_t> (input->readInt());
+            const auto payloadStart = input->getPosition();
+            const auto nextChunk = payloadStart + static_cast<int64_t> (chunkSize) + static_cast<int64_t> (chunkSize & 1u);
+
+            if (chunkIdEquals (chunkId, "fmt "))
+            {
+                info.audioFormat = input->readShort();
+                info.channels = input->readShort();
+                info.sampleRate = input->readInt();
+                static_cast<void> (input->readInt());
+                blockAlign = input->readShort();
+                info.bitsPerSample = input->readShort();
+            }
+            else if (chunkIdEquals (chunkId, "data"))
+            {
+                dataStart = payloadStart;
+                dataBytes = static_cast<int64_t> (chunkSize);
+                break;
+            }
+
+            input->setPosition (nextChunk);
+        }
+
+        if (dataStart < 0 || info.channels <= 0 || info.bitsPerSample <= 0 || blockAlign <= 0)
+        {
+            error = "Incomplete WAV header in " + file.getFileName();
+            return false;
+        }
+
+        info.frames = dataBytes / blockAlign;
+        input->setPosition (dataStart);
+
+        const auto sampleCount = dataBytes / juce::jmax (1, info.bitsPerSample / 8);
+        for (int64_t i = 0; i < sampleCount && ! input->isExhausted(); ++i)
+        {
+            auto sample = 0.0f;
+            if (info.audioFormat == 3 && info.bitsPerSample == 32)
+                sample = input->readFloat();
+            else if (info.audioFormat == 1 && info.bitsPerSample == 24)
+                sample = readInt24Sample (*input);
+            else if (info.audioFormat == 1 && info.bitsPerSample == 16)
+                sample = static_cast<float> (input->readShort()) / 32768.0f;
+            else
+            {
+                error = "Unsupported WAV format in " + file.getFileName();
+                return false;
+            }
+
+            if (! std::isfinite (sample))
+            {
+                error = "Non-finite sample in " + file.getFileName();
+                return false;
+            }
+
+            info.peak = juce::jmax (info.peak, std::abs (sample));
+        }
+
+        error.clear();
+        return true;
+    }
+
     static float exportHeadroomGain (const WavExportOptions& options) noexcept
     {
         return std::pow (10.0f, juce::jlimit (-24.0f, 0.0f, options.headroomDb) / 20.0f);
@@ -4649,9 +4990,10 @@ private:
         juce::AudioBuffer<float> input;
         juce::AudioBuffer<float> output (2, blockSize);
         juce::AudioBuffer<float> processorScratch (2, blockSize);
-        const auto requestedFrames = options.durationSeconds > 0.0
-                                       ? static_cast<uint64_t> (std::ceil (options.durationSeconds * static_cast<double> (options.sampleRate)))
-                                       : std::numeric_limits<uint64_t>::max();
+        const auto requestedFrames = exportFrameLimitForSequence (sequence, options);
+        if (requestedFrames == 0 || requestedFrames > static_cast<uint64_t> (std::numeric_limits<uint32_t>::max()))
+            return false;
+
         uint32_t framesWritten = 0;
         const auto headroomGain = exportHeadroomGain (options);
 
@@ -4679,6 +5021,9 @@ private:
             framesWritten += static_cast<uint32_t> (framesThisBlock);
         }
 
+        if (static_cast<uint64_t> (framesWritten) != requestedFrames)
+            return false;
+
         stream->setPosition (0);
         writeWavHeader (*stream, options, framesWritten);
         stream->flush();
@@ -4693,6 +5038,99 @@ private:
     bool renderMasterMixToFile (const juce::File& file, const WavExportOptions& options)
     {
         return renderSequenceToFile (file, makeMasterExportSequence (options), options, true);
+    }
+
+    static int64_t beatToExportFrame (double beat,
+                                      double sampleRate,
+                                      std::vector<EmbeddedPerformanceEngine::TempoEvent> tempoEvents,
+                                      double fallbackTempoBpm)
+    {
+        if (beat <= 0.0 || sampleRate <= 0.0 || ! std::isfinite (beat) || ! std::isfinite (sampleRate))
+            return 0;
+
+        if (tempoEvents.empty())
+            tempoEvents.push_back ({ 0.0, fallbackTempoBpm });
+
+        std::stable_sort (tempoEvents.begin(), tempoEvents.end(), [] (const auto& a, const auto& b)
+        {
+            return a.beat < b.beat;
+        });
+
+        std::vector<EmbeddedPerformanceEngine::TempoEvent> normalised;
+        normalised.reserve (tempoEvents.size() + 1);
+        if (tempoEvents.front().beat > 0.0)
+            normalised.push_back ({ 0.0, tempoEvents.front().bpm });
+
+        for (const auto& event : tempoEvents)
+        {
+            if (event.beat < 0.0 || event.bpm <= 0.0 || ! std::isfinite (event.beat) || ! std::isfinite (event.bpm))
+                continue;
+
+            if (! normalised.empty() && std::abs (normalised.back().beat - event.beat) < 1.0e-9)
+                normalised.back() = event;
+            else
+                normalised.push_back (event);
+        }
+
+        if (normalised.empty())
+            normalised.push_back ({ 0.0, fallbackTempoBpm });
+
+        auto currentBeat = 0.0;
+        auto currentBpm = normalised.front().bpm;
+        auto frames = 0.0;
+
+        for (size_t i = 1; i < normalised.size(); ++i)
+        {
+            const auto nextBeat = normalised[i].beat;
+            if (nextBeat <= currentBeat)
+            {
+                currentBpm = normalised[i].bpm;
+                continue;
+            }
+
+            const auto segmentEndBeat = juce::jmin (beat, nextBeat);
+            if (segmentEndBeat > currentBeat)
+                frames += EmbeddedPerformanceEngine::beatsToSeconds (segmentEndBeat - currentBeat, currentBpm) * sampleRate;
+
+            if (beat <= nextBeat)
+                return static_cast<int64_t> (std::llround (frames));
+
+            currentBeat = nextBeat;
+            currentBpm = normalised[i].bpm;
+        }
+
+        if (beat > currentBeat)
+            frames += EmbeddedPerformanceEngine::beatsToSeconds (beat - currentBeat, currentBpm) * sampleRate;
+
+        return static_cast<int64_t> (std::llround (frames));
+    }
+
+    uint64_t exportFrameLimitForSequence (const std::vector<EmbeddedPerformanceEngine::State>& sequence,
+                                          const WavExportOptions& options) const
+    {
+        auto stateStartBeat = 0.0;
+        auto endBeat = 0.0;
+
+        for (const auto& state : sequence)
+        {
+            const auto stateEndBeat = stateStartBeat + juce::jmax (0.0, state.durationBeats);
+            endBeat = juce::jmax (endBeat, stateEndBeat + (options.includeTails ? juce::jmax (0.0, state.tailBeats) : 0.0));
+            stateStartBeat = stateEndBeat;
+        }
+
+        if (project.scheduledStopBeat >= 0.0)
+            endBeat = juce::jmin (endBeat, project.scheduledStopBeat);
+
+        const auto sequenceFrames = static_cast<uint64_t> (juce::jmax<int64_t> (0,
+            beatToExportFrame (endBeat,
+                               static_cast<double> (options.sampleRate),
+                               project.tempoMap,
+                               project.globalTempoBpm)));
+        const auto explicitFrames = options.durationSeconds > 0.0
+                                      ? static_cast<uint64_t> (std::ceil (options.durationSeconds * static_cast<double> (options.sampleRate)))
+                                      : std::numeric_limits<uint64_t>::max();
+
+        return juce::jmin (sequenceFrames, explicitFrames);
     }
 
     void exportStems()
@@ -4886,10 +5324,10 @@ private:
                                   });
     }
 
-    void exportStemsToFolder (const juce::File& folder, const WavExportOptions& options)
+    WavExportResult exportStemsToFolderInternal (const juce::File& folder, const WavExportOptions& options)
     {
+        WavExportResult result;
         folder.createDirectory();
-        auto exported = 0;
         std::set<std::string> usedNames;
 
         const auto makeUnique = [&usedNames] (juce::String fileName)
@@ -4956,7 +5394,14 @@ private:
                     const auto& track = state.tracks[static_cast<size_t> (trackIndex)];
                     const auto file = folder.getChildFile (stemFileName (stateIndex, state, trackIndex, track));
                     if (renderStemToFile (file, stateIndex, trackIndex, options))
-                        ++exported;
+                    {
+                        ++result.exported;
+                    }
+                    else
+                    {
+                        ++result.failed;
+                        result.failures.add (file.getFileName());
+                    }
                 }
             }
         }
@@ -4965,9 +5410,22 @@ private:
         {
             const auto file = folder.getChildFile (makeUnique ("00_Master Mix.wav"));
             if (renderMasterMixToFile (file, options))
-                ++exported;
+            {
+                ++result.exported;
+            }
+            else
+            {
+                ++result.failed;
+                result.failures.add (file.getFileName());
+            }
         }
 
+        return result;
+    }
+
+    void exportStemsToFolder (const juce::File& folder, const WavExportOptions& options)
+    {
+        const auto result = exportStemsToFolderInternal (folder, options);
         const auto bitDepthLabel = options.bitDepth == WavExportOptions::BitDepth::float32 ? "32-bit float"
                                 : (options.bitDepth == WavExportOptions::BitDepth::pcm24 ? "24-bit PCM" : "16-bit PCM");
         const auto channelLabel = options.channels == 1 ? "mono" : "stereo";
@@ -4975,12 +5433,15 @@ private:
                                      ? " for " + juce::String (options.durationSeconds, 2) + " seconds"
                                      : juce::String();
         const auto headroomLabel = options.headroomDb < -0.01f ? " with " + juce::String (options.headroomDb, 0) + " dB headroom" : juce::String();
-        juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon,
-                                                "Export complete",
-                                                "Exported " + juce::String (exported) + " "
+        const auto failedLabel = result.failed > 0
+                                   ? " (" + juce::String (result.failed) + " failed)"
+                                   : juce::String();
+        juce::AlertWindow::showMessageBoxAsync (result.failed > 0 ? juce::AlertWindow::WarningIcon : juce::AlertWindow::InfoIcon,
+                                                result.failed > 0 ? "Export incomplete" : "Export complete",
+                                                "Exported " + juce::String (result.exported) + " "
                                                     + juce::String (options.sampleRate / 1000.0, 1)
                                                     + " kHz " + bitDepthLabel + " " + channelLabel + " stem files"
-                                                    + durationLabel + headroomLabel + ".");
+                                                    + durationLabel + headroomLabel + failedLabel + ".");
     }
 
     int limitedTopPanelHeight (int proposedHeight) const
@@ -6009,11 +6470,34 @@ class AlchemyApplication final : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override { return "Alchemy"; }
-    const juce::String getApplicationVersion() override { return "0.1.0"; }
+    const juce::String getApplicationVersion() override { return "0.1.5"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
+        const auto args = juce::StringArray::fromTokens (commandLine, true);
+        const auto wavExportTestIndex = args.indexOf ("--wav-export-test");
+        if (wavExportTestIndex >= 0)
+        {
+            const auto folder = wavExportTestIndex + 1 < args.size()
+                                  ? juce::File (args[wavExportTestIndex + 1])
+                                  : juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("alchemy-wav-export-test");
+            MainComponent component;
+            juce::String error;
+            if (! component.runWavExportRegressionTest (folder, error))
+            {
+                std::cerr << "WAV export test failed: " << error << std::endl;
+                setApplicationReturnValue (1);
+                quit();
+                return;
+            }
+
+            std::cout << "WAV export test passed: " << folder.getFullPathName() << std::endl;
+            setApplicationReturnValue (0);
+            quit();
+            return;
+        }
+
         mainWindow = std::make_unique<MainWindow> (getApplicationName());
     }
 

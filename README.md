@@ -107,7 +107,7 @@ The examples are copied into the app bundle at build time and are also available
 For a repeatable macOS release zip:
 
 ```sh
-scripts/package_macos_release.sh 0.1.1
+scripts/package_macos_release.sh 0.1.5
 ```
 
 The package script rebuilds the GUI, copies the example projects, copies any local optional Csound/RTcmix/SuperCollider runtime libraries it can find into `Alchemy.app/Contents/Frameworks`, bundles the SuperCollider class library and Faust standard libraries when present, writes a dependency manifest, and creates `dist/Alchemy-v<version>-macOS.zip`.
@@ -131,6 +131,14 @@ This renders a small compatibility corpus for ChucK, Faust, Csound, SuperCollide
 - https://rtcmix.org/reference/instruments/AMINST.html
 
 Languages that are declared but not built into the current binary are reported as skipped. SuperCollider examples from `supercollider.github.io/examples` that use `{ ... }.play` should be pasted into Alchemy as the function body only, returning the audio signal; Alchemy owns the synth lifetime and output routing.
+
+To check the WAV export path headlessly:
+
+```sh
+build/AlchemyGui_artefacts/Release/Alchemy.app/Contents/MacOS/Alchemy --wav-export-test /tmp/alchemy-wav-export-test
+```
+
+This creates a short all-language project, exports ChucK/Csound/Faust/SuperCollider/RTcmix stems plus a master mix, and validates WAV headers, exact frame counts, non-silent audio, and 32-bit float, 24-bit PCM, and 16-bit mono output variants.
 
 The score VM exposes `score`, `state`, and `track` APIs inside ChucK. String arguments are marshalled to the host bridge, while timing, loops, functions, and conditionals are ordinary ChucK:
 

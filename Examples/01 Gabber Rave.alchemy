@@ -7,22 +7,93 @@
   "globalPhaseBeats": 0,
   "scheduledStopBeat": -1,
   "loopPlayback": true,
-  "chuckScoreScript": "score.clear();\ntempo(210);\nmeter(4, 4);\nstate.add(\"Kick Room\", 32, 2);\ntrack.add(1, \"60Hz hammer\", \"chuck\");\ntrack.gain(1, 1, 0.86);\ntrack.add(1, \"hard edge\", \"csound\");\ntrack.gain(1, 2, 0.38);\nstate.add(\"Hoover Lift\", 32, 4);\ntrack.add(2, \"detuned hoover\", \"supercollider\");\ntrack.gain(2, 1, 0.42);\ntrack.add(2, \"sync bass\", \"chuck\");\ntrack.gain(2, 2, 0.50);\nstate.add(\"Rumble Break\", 48, 4);\ntrack.add(3, \"rtcmix rumble\", \"rtcmix\");\ntrack.gain(3, 1, 0.42);\ntrack.add(3, \"broken kick\", \"chuck\");\ntrack.gain(3, 2, 0.70);\nstate.add(\"Coda\", 24, 2);\ntrack.add(4, \"floor siren\", \"chuck\");\ntrack.gain(4, 1, 0.46);\nstate.connect(1, 2, 70);\nstate.connect(1, 3, 30);\nstate.connect(2, 3, 50);\nstate.connect(2, 4, 50);\nstate.connect(3, 4, 1);\nplay();",
+  "chuckScoreScript": "score.clear();\ntempo(210);\nmeter(4, 4);\nstate.add(\"60Hz Room\", 32, 2);\ntrack.add(1, \"ChucK 60Hz gabber kick\", \"chuck\");\ntrack.gain(1, 1, 0.50);\ntrack.add(1, \"Offbeat hoover stab\", \"chuck\");\ntrack.gain(1, 2, 0.36);\ntrack.add(1, \"Csound hard edge\", \"csound\");\ntrack.gain(1, 3, 0.30);\ntrack.add(1, \"Sub pressure\", \"chuck\");\ntrack.gain(1, 4, 0.34);\nstate.add(\"Hoover Lift\", 32, 4);\ntrack.add(2, \"SC gabber hoover\", \"supercollider\");\ntrack.gain(2, 1, 0.34);\ntrack.add(2, \"ChucK detuned hoover\", \"chuck\");\ntrack.gain(2, 2, 0.30);\ntrack.add(2, \"Syncopated heavy bass\", \"chuck\");\ntrack.gain(2, 3, 0.36);\ntrack.add(2, \"ChucK siren pin\", \"chuck\");\ntrack.gain(2, 4, 0.22);\nstate.add(\"Rumble Break\", 48, 4);\ntrack.add(3, \"RTcmix 60Hz rumble\", \"rtcmix\");\ntrack.gain(3, 1, 0.44);\ntrack.add(3, \"ChucK pedal hammer\", \"chuck\");\ntrack.gain(3, 2, 0.28);\ntrack.add(3, \"ChucK broken kick\", \"chuck\");\ntrack.gain(3, 3, 0.38);\ntrack.add(3, \"ChucK low hoover\", \"chuck\");\ntrack.gain(3, 4, 0.28);\nstate.add(\"Strobe Coda\", 24, 2);\ntrack.add(4, \"ChucK coda stab\", \"chuck\");\ntrack.gain(4, 1, 0.40);\ntrack.add(4, \"ChucK coda hoover\", \"chuck\");\ntrack.gain(4, 2, 0.34);\ntrack.add(4, \"Csound closing rave\", \"csound\");\ntrack.gain(4, 3, 0.34);\ntrack.add(4, \"ChucK floor siren\", \"chuck\");\ntrack.gain(4, 4, 0.30);\nstate.connect(1, 2, 70);\nstate.connect(1, 3, 30);\nstate.connect(2, 3, 50);\nstate.connect(2, 4, 50);\nstate.connect(3, 4, 1);\nplay();",
   "tempoMap": [],
   "timeSignatureMap": [],
   "phaseRotationMap": [],
-  "arrangementOrder": [0, 1, 2, 3],
+  "arrangementOrder": [
+    0,
+    1,
+    2,
+    3,
+    0,
+    2,
+    3
+  ],
   "states": [
     {
-      "name": "Kick Room",
+      "name": "60Hz Room",
       "durationBeats": 32,
       "tailBeats": 2,
       "canvasX": 70,
       "canvasY": 160,
-      "transitions": [{"targetStateIndex": 1, "weight": 70}, {"targetStateIndex": 2, "weight": 30}],
+      "transitions": [
+        {
+          "targetStateIndex": 1,
+          "weight": 70
+        },
+        {
+          "targetStateIndex": 2,
+          "weight": 30
+        }
+      ],
       "tracks": [
-        {"name": "60Hz hammer", "language": "chuck", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.86, "muted": false, "soloed": false, "code": "SinOsc s => Gain g => dac;\nwhile (true) {\n    60 => s.freq;\n    0.85 => g.gain;\n    35::ms => now;\n    0 => g.gain;\n    80::ms => now;\n}", "gainEvents": []},
-        {"name": "hard edge", "language": "csound", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.38, "muted": false, "soloed": false, "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.7, kfreq * 5, giSine\n a2 tanh(a1 * 8)\n outs a2, a2\nendin", "gainEvents": []}
+        {
+          "name": "ChucK 60Hz gabber kick",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.5,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc k => Gain g => dac;\nwhile (true) {\n    60 => k.freq;\n    0.82 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    32::ms => now;\n    0 => g.gain;\n    82::ms => now;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "Offbeat hoover stab",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.36,
+          "muted": false,
+          "soloed": false,
+          "code": "SawOsc a => Gain mix => dac;\nSawOsc b => mix;\n0.22 => mix.gain;\nwhile (true) {\n    hostFreq * 1.5 => a.freq;\n    hostFreq * 1.505 => b.freq;\n    55::ms => now;\n    0.02 => mix.gain;\n    95::ms => now;\n    0.22 * hostGain * hostStateGain * hostTrackGain => mix.gain;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "Csound hard edge",
+          "language": "csound",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.28, kfreq * 5, giSine\n a2 tanh(a1 * 7)\n outs a2, a2\nendin",
+          "gainEvents": []
+        },
+        {
+          "name": "Sub pressure",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc b => Gain g => dac;\n[36, 36, 43, 36, 48, 36, 34, 36] @=> int notes[];\n0 => int i;\nwhile (true) {\n    Std.mtof(notes[i % notes.cap()]) => b.freq;\n    0.32 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    70::ms => now;\n    0 => g.gain;\n    45::ms => now;\n    i++;\n}",
+          "gainEvents": []
+        }
       ]
     },
     {
@@ -31,10 +102,73 @@
       "tailBeats": 4,
       "canvasX": 330,
       "canvasY": 60,
-      "transitions": [{"targetStateIndex": 2, "weight": 50}, {"targetStateIndex": 3, "weight": 50}],
+      "transitions": [
+        {
+          "targetStateIndex": 2,
+          "weight": 50
+        },
+        {
+          "targetStateIndex": 3,
+          "weight": 50
+        }
+      ],
       "tracks": [
-        {"name": "detuned hoover", "language": "supercollider", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.42, "muted": false, "soloed": false, "code": "{ |freq = 440, gain = 0.1, blend = 0.5| Splay.ar(Saw.ar(freq * [0.495, 0.5, 0.997, 1.003]) * gain).tanh }", "gainEvents": []},
-        {"name": "sync bass", "language": "chuck", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.50, "muted": false, "soloed": false, "code": "SinOsc b => Gain g => dac;\n[55, 55, 82, 55, 73, 55, 98, 55] @=> int notes[];\n0 => int i;\nwhile (true) {\n    Std.mtof(notes[i % notes.cap()]) => b.freq;\n    0.5 => g.gain;\n    70::ms => now;\n    0 => g.gain;\n    40::ms => now;\n    i++;\n}", "gainEvents": []}
+        {
+          "name": "SC gabber hoover",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 440, gain = 0.1, blend = 0.5| Splay.ar(Saw.ar(freq * [0.495, 0.5, 0.997, 1.003]) * gain * 0.45).tanh }",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK detuned hoover",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "SawOsc a => Gain mix => dac;\nSawOsc b => mix;\nwhile (true) {\n    hostFreq * 0.5 => a.freq;\n    hostFreq * 0.503 => b.freq;\n    0.20 * hostGain * hostStateGain * hostTrackGain => mix.gain;\n    1::sample => now;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "Syncopated heavy bass",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.36,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc b => Gain g => dac;\n[36, 36, 36, 43, 36, 48, 36, 34] @=> int notes[];\n0 => int i;\nwhile (true) {\n    Std.mtof(notes[i % notes.cap()]) => b.freq;\n    0.38 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    58::ms => now;\n    0 => g.gain;\n    (i % 3 == 0 ? 96::ms : 42::ms) => now;\n    i++;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK siren pin",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.22,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc s => Gain g => dac;\nwhile (true) {\n    Math.random2f(480, 960) => s.freq;\n    0.12 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    85::ms => now;\n}",
+          "gainEvents": []
+        }
       ]
     },
     {
@@ -43,21 +177,135 @@
       "tailBeats": 4,
       "canvasX": 330,
       "canvasY": 230,
-      "transitions": [{"targetStateIndex": 3, "weight": 1}],
+      "transitions": [
+        {
+          "targetStateIndex": 3,
+          "weight": 1
+        }
+      ],
       "tracks": [
-        {"name": "rtcmix rumble", "language": "rtcmix", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.42, "muted": false, "soloed": false, "code": "bus_config(\"WAVETABLE\", \"out 0\")\nfreq = makeconnection(\"inlet\", 1, 60)\ngain = makeconnection(\"inlet\", 2, 0.2)\nwave = maketable(\"wave\", 1024, 1)\nWAVETABLE(0, 3600, gain * 32767, freq, 0.5, wave)", "gainEvents": []},
-        {"name": "broken kick", "language": "chuck", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.70, "muted": false, "soloed": false, "code": "SinOsc k => Gain g => dac;\nwhile (true) { 60 => k.freq; 0.7 => g.gain; 45::ms => now; 0 => g.gain; 65::ms => now; }", "gainEvents": []}
+        {
+          "name": "RTcmix 60Hz rumble",
+          "language": "rtcmix",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.44,
+          "muted": false,
+          "soloed": false,
+          "code": "bus_config(\"WAVETABLE\", \"out 0\")\nfreq = makeconnection(\"inlet\", 1, 60)\ngain = makeconnection(\"inlet\", 2, 0.18)\nwave = maketable(\"wave\", 1024, 1)\nWAVETABLE(0, 3600, gain * 32767, freq, 0.5, wave)",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK pedal hammer",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.28,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc k => Gain g => dac;\nwhile (true) { 45 => k.freq; 0.56 * hostGain * hostStateGain * hostTrackGain => g.gain; 38::ms => now; 0 => g.gain; 76::ms => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK broken kick",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.38,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc k => Gain g => dac;\nwhile (true) { 60 => k.freq; 0.70 * hostGain * hostStateGain * hostTrackGain => g.gain; 42::ms => now; 0 => g.gain; Math.random2(55, 105)::ms => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK low hoover",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.28,
+          "muted": false,
+          "soloed": false,
+          "code": "SawOsc low => Gain g => dac;\nwhile (true) { hostFreq * 0.5 => low.freq; 0.14 * hostGain * hostStateGain * hostTrackGain => g.gain; 1::sample => now; }",
+          "gainEvents": []
+        }
       ]
     },
     {
-      "name": "Coda",
+      "name": "Strobe Coda",
       "durationBeats": 24,
       "tailBeats": 2,
       "canvasX": 590,
       "canvasY": 160,
       "transitions": [],
       "tracks": [
-        {"name": "floor siren", "language": "chuck", "sync": true, "tempo": 210, "timeSigNumerator": 4, "timeSigDenominator": 4, "phase": 0, "gain": 0.46, "muted": false, "soloed": false, "code": "SinOsc s => Gain g => dac;\nwhile (true) { Math.random2f(300, 900) => s.freq; 0.18 => g.gain; 90::ms => now; }", "gainEvents": []}
+        {
+          "name": "ChucK coda stab",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.4,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc s => Gain g => dac;\nwhile (true) { Math.random2f(220, 680) => s.freq; 0.16 * hostGain * hostStateGain * hostTrackGain => g.gain; 90::ms => now; 0 => g.gain; 50::ms => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK coda hoover",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "SawOsc a => Gain mix => dac;\nSawOsc b => mix;\nwhile (true) { hostFreq * 1.25 => a.freq; hostFreq * 1.253 => b.freq; 0.14 * hostGain * hostStateGain * hostTrackGain => mix.gain; 1::sample => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "Csound closing rave",
+          "language": "csound",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.22, kfreq * 8, giSine\n outs a1, a1\nendin",
+          "gainEvents": []
+        },
+        {
+          "name": "ChucK floor siren",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 210,
+          "timeSigNumerator": 4,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc s => Gain g => dac;\nwhile (true) { Math.random2f(300, 900) => s.freq; 0.13 * hostGain * hostStateGain * hostTrackGain => g.gain; 80::ms => now; }",
+          "gainEvents": []
+        }
       ]
     }
   ]

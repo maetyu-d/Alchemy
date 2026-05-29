@@ -7,14 +7,268 @@
   "globalPhaseBeats": 0.5,
   "scheduledStopBeat": -1,
   "loopPlayback": true,
-  "chuckScoreScript": "score.clear();\ntempo(132);\nmeter(7, 8);\nphase(0.5);\nstate.add(\"Seven\", 28, 3);\ntrack.add(1, \"seven pulse\", \"chuck\");\nstate.add(\"Five\", 20, 5);\ntrack.add(2, \"five answer\", \"chuck\");\nstate.add(\"Eleven\", 22, 5);\ntrack.add(3, \"eleven shimmer\", \"supercollider\");\nstate.connect(1, 2, 60);\nstate.connect(1, 3, 40);\nstate.connect(2, 1, 25);\nstate.connect(2, 3, 75);\nplay();",
-  "tempoMap": [],
-  "timeSignatureMap": [{"beat": 0, "numerator": 7, "denominator": 8}, {"beat": 48, "numerator": 5, "denominator": 4}],
-  "phaseRotationMap": [{"beat": 0, "rotationBeats": 0.5}],
-  "arrangementOrder": [0, 1, 0, 2],
+  "chuckScoreScript": "score.clear();\ntempo(132);\nmeter(7, 8);\nphase(0.5);\nstate.add(\"Seven Gate\", 28, 3);\ntrack.add(1, \"SC pulse drums\", \"supercollider\");\ntrack.gain(1, 1, 0.30);\ntrack.add(1, \"seven pulse\", \"chuck\");\ntrack.gain(1, 2, 0.32);\ntrack.add(1, \"phase bell\", \"csound\");\ntrack.gain(1, 3, 0.30);\ntrack.add(1, \"sub orbit\", \"chuck\");\ntrack.gain(1, 4, 0.28);\nstate.add(\"Five Turn\", 20, 5);\ntrack.add(2, \"SC off-grid drums\", \"supercollider\");\ntrack.gain(2, 1, 0.28);\ntrack.add(2, \"five answer\", \"chuck\");\ntrack.gain(2, 2, 0.30);\ntrack.add(2, \"off-grid bass\", \"chuck\");\ntrack.gain(2, 3, 0.30);\ntrack.add(2, \"SC glass cloud\", \"supercollider\");\ntrack.gain(2, 4, 0.26);\nstate.add(\"Eleven Field\", 22, 5);\ntrack.add(3, \"SC eleven drums\", \"supercollider\");\ntrack.gain(3, 1, 0.28);\ntrack.add(3, \"eleven shimmer\", \"supercollider\");\ntrack.gain(3, 2, 0.28);\ntrack.add(3, \"RTcmix low clock\", \"rtcmix\");\ntrack.gain(3, 3, 0.34);\ntrack.add(3, \"needle counter\", \"chuck\");\ntrack.gain(3, 4, 0.26);\nstate.connect(1, 2, 60);\nstate.connect(1, 3, 40);\nstate.connect(2, 1, 25);\nstate.connect(2, 3, 75);\nstate.connect(3, 1, 1);\nplay();",
+  "tempoMap": [
+    {
+      "beat": 0,
+      "bpm": 132
+    },
+    {
+      "beat": 48,
+      "bpm": 148
+    }
+  ],
+  "timeSignatureMap": [
+    {
+      "beat": 0,
+      "numerator": 7,
+      "denominator": 8
+    },
+    {
+      "beat": 48,
+      "numerator": 5,
+      "denominator": 4
+    }
+  ],
+  "phaseRotationMap": [
+    {
+      "beat": 0,
+      "rotationBeats": 0.5
+    },
+    {
+      "beat": 28,
+      "rotationBeats": 1.25
+    }
+  ],
+  "arrangementOrder": [
+    0,
+    1,
+    0,
+    2,
+    1,
+    2
+  ],
   "states": [
-    {"name": "Seven", "durationBeats": 28, "tailBeats": 3, "canvasX": 80, "canvasY": 150, "transitions": [{"targetStateIndex": 1, "weight": 60}, {"targetStateIndex": 2, "weight": 40}], "tracks": [{"name": "seven pulse", "language": "chuck", "sync": true, "tempo": 132, "timeSigNumerator": 7, "timeSigDenominator": 8, "phase": 0, "gain": 0.44, "muted": false, "soloed": false, "code": "SinOsc s => Gain g => dac;\nwhile (true) { 196 => s.freq; 0.28 => g.gain; 80::ms => now; 0 => g.gain; 120::ms => now; }", "gainEvents": []}]},
-    {"name": "Five", "durationBeats": 20, "tailBeats": 5, "canvasX": 330, "canvasY": 70, "transitions": [{"targetStateIndex": 0, "weight": 25}, {"targetStateIndex": 2, "weight": 75}], "tracks": [{"name": "five answer", "language": "chuck", "sync": false, "tempo": 110, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0.25, "gain": 0.38, "muted": false, "soloed": false, "code": "TriOsc t => Gain g => dac;\nwhile (true) { 275 => t.freq; 0.22 => g.gain; 130::ms => now; 0 => g.gain; 170::ms => now; }", "gainEvents": []}]},
-    {"name": "Eleven", "durationBeats": 22, "tailBeats": 5, "canvasX": 590, "canvasY": 180, "transitions": [], "tracks": [{"name": "eleven shimmer", "language": "supercollider", "sync": true, "tempo": 132, "timeSigNumerator": 11, "timeSigDenominator": 8, "phase": 0, "gain": 0.30, "muted": false, "soloed": false, "code": "{ |freq = 440, gain = 0.1, blend = 0.5| SinOsc.ar(freq * [1, 1.5, 2.25], 0, gain * [0.6, 0.3, 0.2]).sum.dup }", "gainEvents": []}]}
+    {
+      "name": "Seven Gate",
+      "durationBeats": 28,
+      "tailBeats": 3,
+      "canvasX": 80,
+      "canvasY": 150,
+      "transitions": [
+        {
+          "targetStateIndex": 1,
+          "weight": 60
+        },
+        {
+          "targetStateIndex": 2,
+          "weight": 40
+        }
+      ],
+      "tracks": [
+        {
+          "name": "SC pulse drums",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 7,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 440, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var tempo, snare, bdrum, hihat, drunk, swing;\n    tempo = Impulse.ar((tempoBpm / 60) * 2);\n    swing = PulseDivider.ar(tempo, 2, 1) * 0.006;\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.46));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.50));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005 + swing, 0.28);\n    ((snare + bdrum + hihat) * gain * 2.2 * stateGain * trackGain).dup\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "seven pulse",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 7,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.32,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc s => Gain g => dac;\n[196, 247, 294, 196, 330, 247, 220] @=> int notes[];\n0 => int i;\nwhile (true) {\n    notes[i % notes.cap()] => s.freq;\n    0.22 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    75::ms => now;\n    0 => g.gain;\n    110::ms => now;\n    i++;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "phase bell",
+          "language": "csound",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 7,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.20, kfreq * 2.5, giSine\n a2 oscili kgain * 0.10, kfreq * 3.5, giSine\n outs a1 + a2, a1 - a2\nendin",
+          "gainEvents": []
+        },
+        {
+          "name": "sub orbit",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 7,
+          "timeSigDenominator": 8,
+          "phase": 0.5,
+          "gain": 0.28,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc b => Gain g => dac;\n[43, 43, 50, 43, 55, 50, 38] @=> int notes[];\n0 => int i;\nwhile (true) {\n    Std.mtof(notes[i % notes.cap()]) => b.freq;\n    0.24 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    155::ms => now;\n    0.04 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    95::ms => now;\n    i++;\n}",
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Five Turn",
+      "durationBeats": 20,
+      "tailBeats": 5,
+      "canvasX": 330,
+      "canvasY": 70,
+      "transitions": [
+        {
+          "targetStateIndex": 0,
+          "weight": 25
+        },
+        {
+          "targetStateIndex": 2,
+          "weight": 75
+        }
+      ],
+      "tracks": [
+        {
+          "name": "SC off-grid drums",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 110,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0.25,
+          "gain": 0.28,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 440, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var tempo, snare, bdrum, hihat, drunk, swing;\n    tempo = Impulse.ar((tempoBpm / 60) * 2);\n    swing = PulseDivider.ar(tempo, 2, 1) * 0.006;\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.46));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.50));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005 + swing, 0.28);\n    ((snare + bdrum + hihat) * gain * 2.2 * stateGain * trackGain).dup\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "five answer",
+          "language": "chuck",
+          "sync": false,
+          "tempo": 110,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0.25,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "TriOsc t => Gain g => dac;\n[275, 330, 367, 412, 330] @=> int notes[];\n0 => int i;\nwhile (true) {\n    notes[i % notes.cap()] => t.freq;\n    0.20 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    130::ms => now;\n    0 => g.gain;\n    170::ms => now;\n    i++;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "off-grid bass",
+          "language": "chuck",
+          "sync": false,
+          "tempo": 110,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0.25,
+          "gain": 0.3,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc b => Gain g => dac;\n[38, 45, 38, 50, 36] @=> int notes[];\n0 => int i;\nwhile (true) {\n    Std.mtof(notes[i % notes.cap()]) => b.freq;\n    0.30 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    95::ms => now;\n    0 => g.gain;\n    145::ms => now;\n    i++;\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "SC glass cloud",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.26,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 440, gain = 0.1, blend = 0.5| SinOsc.ar(freq * [1, 1.25, 1.875, 2.5], 0, gain * [0.30, 0.18, 0.12, 0.08]).sum.dup }",
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Eleven Field",
+      "durationBeats": 22,
+      "tailBeats": 5,
+      "canvasX": 590,
+      "canvasY": 180,
+      "transitions": [
+        {
+          "targetStateIndex": 0,
+          "weight": 1
+        }
+      ],
+      "tracks": [
+        {
+          "name": "SC eleven drums",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 11,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.28,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 440, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 132, stateBeat = 0, globalBeat = 0, timeSigNumerator = 7, timeSigDenominator = 8, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|\n    var tempo, snare, bdrum, hihat, drunk, swing;\n    tempo = Impulse.ar((tempoBpm / 60) * 2);\n    swing = PulseDivider.ar(tempo, 2, 1) * 0.006;\n    snare = WhiteNoise.ar(Decay2.ar(PulseDivider.ar(tempo, 4, 2), 0.005, 0.46));\n    bdrum = SinOsc.ar(Line.ar(120, 60, 1), 0, Decay2.ar(PulseDivider.ar(tempo, 4, 0), 0.005, 0.50));\n    hihat = HPF.ar(WhiteNoise.ar(1), 10000) * Decay2.ar(tempo, 0.005 + swing, 0.28);\n    ((snare + bdrum + hihat) * gain * 2.2 * stateGain * trackGain).dup\n}",
+          "gainEvents": []
+        },
+        {
+          "name": "eleven shimmer",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 11,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.28,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 440, gain = 0.1, blend = 0.5| SinOsc.ar(freq * [1, 1.5, 2.25], 0, gain * [0.35, 0.18, 0.10]).sum.dup }",
+          "gainEvents": []
+        },
+        {
+          "name": "RTcmix low clock",
+          "language": "rtcmix",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 11,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.34,
+          "muted": false,
+          "soloed": false,
+          "code": "bus_config(\"WAVETABLE\", \"out 0\")\nfreq = makeconnection(\"inlet\", 1, 72)\ngain = makeconnection(\"inlet\", 2, 0.12)\nwave = maketable(\"wave\", 1024, 1)\nWAVETABLE(0, 2400, gain * 32767, freq * 0.5, 0.5, wave)",
+          "gainEvents": []
+        },
+        {
+          "name": "needle counter",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 132,
+          "timeSigNumerator": 11,
+          "timeSigDenominator": 8,
+          "phase": 0,
+          "gain": 0.26,
+          "muted": false,
+          "soloed": false,
+          "code": "PulseOsc p => Gain g => dac;\n0.25 => p.width;\nwhile (true) {\n    Math.random2f(520, 1040) => p.freq;\n    0.09 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    52::ms => now;\n    0 => g.gain;\n    88::ms => now;\n}",
+          "gainEvents": []
+        }
+      ]
+    }
   ]
 }

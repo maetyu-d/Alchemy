@@ -7,14 +7,201 @@
   "globalPhaseBeats": 0,
   "scheduledStopBeat": -1,
   "loopPlayback": true,
-  "chuckScoreScript": "score.clear();\ntempo(84);\nmeter(5, 4);\nstate.add(\"Glass\", 20, 8);\ntrack.add(1, \"slow fifths\", \"chuck\");\nstate.add(\"Low Cloud\", 15, 10);\ntrack.add(2, \"low bloom\", \"chuck\");\nstate.add(\"Bright Return\", 25, 8);\ntrack.add(3, \"bright pins\", \"csound\");\nstate.connect(1, 2, 45);\nstate.connect(1, 3, 55);\nstate.connect(2, 3, 1);\nplay();",
-  "tempoMap": [{"beat": 0, "bpm": 84}, {"beat": 40, "bpm": 96}],
-  "timeSignatureMap": [{"beat": 0, "numerator": 5, "denominator": 4}],
+  "chuckScoreScript": "score.clear();\ntempo(84);\nmeter(5, 4);\nstate.add(\"Glass\", 24, 10);\ntrack.add(1, \"slow fifths\", \"chuck\");\ntrack.gain(1, 1, 0.26);\ntrack.add(1, \"breath shimmer\", \"chuck\");\ntrack.gain(1, 2, 0.22);\ntrack.add(1, \"csound glint\", \"csound\");\ntrack.gain(1, 3, 0.20);\nstate.add(\"Low Cloud\", 20, 12);\ntrack.add(2, \"low bloom\", \"chuck\");\ntrack.gain(2, 1, 0.24);\ntrack.add(2, \"slow answer\", \"chuck\");\ntrack.gain(2, 2, 0.18);\ntrack.add(2, \"quiet sub\", \"rtcmix\");\ntrack.gain(2, 3, 0.26);\nstate.add(\"Bright Return\", 28, 10);\ntrack.add(3, \"bright pins\", \"csound\");\ntrack.gain(3, 1, 0.22);\ntrack.add(3, \"wide fifth\", \"supercollider\");\ntrack.gain(3, 2, 0.25);\ntrack.add(3, \"soft pulse\", \"chuck\");\ntrack.gain(3, 3, 0.21);\nstate.connect(1, 2, 45);\nstate.connect(1, 3, 55);\nstate.connect(2, 3, 1);\nplay();",
+  "tempoMap": [
+    {
+      "beat": 0,
+      "bpm": 84
+    },
+    {
+      "beat": 48,
+      "bpm": 96
+    }
+  ],
+  "timeSignatureMap": [
+    {
+      "beat": 0,
+      "numerator": 5,
+      "denominator": 4
+    }
+  ],
   "phaseRotationMap": [],
-  "arrangementOrder": [0, 2, 1, 2],
+  "arrangementOrder": [
+    0,
+    2,
+    1,
+    2
+  ],
   "states": [
-    {"name": "Glass", "durationBeats": 20, "tailBeats": 8, "canvasX": 80, "canvasY": 130, "transitions": [{"targetStateIndex": 1, "weight": 45}, {"targetStateIndex": 2, "weight": 55}], "tracks": [{"name": "slow fifths", "language": "chuck", "sync": true, "tempo": 84, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0, "gain": 0.25, "muted": false, "soloed": false, "code": "SinOsc a => Gain g => dac;\nwhile (true) { 220 => a.freq; 0.18 => g.gain; 2::second => now; 330 => a.freq; 2::second => now; }", "gainEvents": []}]},
-    {"name": "Low Cloud", "durationBeats": 15, "tailBeats": 10, "canvasX": 330, "canvasY": 220, "transitions": [{"targetStateIndex": 2, "weight": 1}], "tracks": [{"name": "low bloom", "language": "chuck", "sync": true, "tempo": 84, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0, "gain": 0.32, "muted": false, "soloed": false, "code": "SinOsc s => Gain g => dac;\nwhile (true) { 110 => s.freq; 0.22 => g.gain; 3::second => now; }", "gainEvents": []}]},
-    {"name": "Bright Return", "durationBeats": 25, "tailBeats": 8, "canvasX": 580, "canvasY": 130, "transitions": [], "tracks": [{"name": "bright pins", "language": "csound", "sync": true, "tempo": 96, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0, "gain": 0.24, "muted": false, "soloed": false, "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.5, kfreq * 3, giSine\n outs a1, a1\nendin", "gainEvents": []}]}
+    {
+      "name": "Glass",
+      "durationBeats": 24,
+      "tailBeats": 10,
+      "canvasX": 80,
+      "canvasY": 130,
+      "transitions": [
+        {
+          "targetStateIndex": 1,
+          "weight": 45
+        },
+        {
+          "targetStateIndex": 2,
+          "weight": 55
+        }
+      ],
+      "tracks": [
+        {
+          "name": "slow fifths",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 84,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.26,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc a => Gain ag => Gain mix => dac;\nSinOsc b => Gain bg => mix;\n0.55 => ag.gain; 0.35 => bg.gain;\nwhile (true) { 220 => a.freq; 330 => b.freq; 0.16 * hostStateGain * hostTrackGain => mix.gain; 1::samp => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "breath shimmer",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 84,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.22,
+          "muted": false,
+          "soloed": false,
+          "code": "TriOsc t => Gain g => dac;\nwhile (true) { 440 + (Math.sin(hostGlobalBeat * 0.12) * 18) => t.freq; 0.10 * (0.55 + (0.45 * hostBarPhase)) * hostStateGain * hostTrackGain => g.gain; 1::samp => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "csound glint",
+          "language": "csound",
+          "sync": true,
+          "tempo": 84,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.2,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n ktrack chnget \"hostTrackGain\"\n kstate chnget \"hostStateGain\"\n kbeat chnget \"hostStateBeat\"\n kenv = exp(-frac(kbeat * 0.5) * 5)\n a1 oscili kgain * ktrack * kstate * 0.18 * kenv, kfreq * 6, giSine\n outs a1, a1\nendin",
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Low Cloud",
+      "durationBeats": 20,
+      "tailBeats": 12,
+      "canvasX": 330,
+      "canvasY": 220,
+      "transitions": [
+        {
+          "targetStateIndex": 2,
+          "weight": 1
+        }
+      ],
+      "tracks": [
+        {
+          "name": "low bloom",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 84,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.24,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc s => Gain g => dac;\nwhile (true) { 110 + (Math.sin(hostGlobalBeat * 0.08) * 3) => s.freq; 0.18 * hostStateGain * hostTrackGain => g.gain; 1::samp => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "slow answer",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 84,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.18,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc a => Gain g => dac;\nwhile (true) { 165 + (Math.sin(hostStateBeat * 0.16) * 9) => a.freq; 0.10 * (0.35 + hostBarPhase) * hostStateGain * hostTrackGain => g.gain; 1::samp => now; }",
+          "gainEvents": []
+        },
+        {
+          "name": "quiet sub",
+          "language": "rtcmix",
+          "sync": true,
+          "tempo": 84,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.26,
+          "muted": false,
+          "soloed": false,
+          "code": "bus_config(\"WAVETABLE\", \"out 0\")\nfreq = makeconnection(\"inlet\", 1, 55)\ngain = makeconnection(\"inlet\", 2, 0.035)\nstategain = makeconnection(\"inlet\", 5, 1)\ntrackgain = makeconnection(\"inlet\", 14, 1)\nwave = maketable(\"wave\", 4096, \"sine\", 1, 0.22)\nWAVETABLE(0, 3600, gain * stategain * trackgain * 32767, 55, 0.5, wave)",
+          "gainEvents": []
+        }
+      ]
+    },
+    {
+      "name": "Bright Return",
+      "durationBeats": 28,
+      "tailBeats": 10,
+      "canvasX": 580,
+      "canvasY": 130,
+      "transitions": [],
+      "tracks": [
+        {
+          "name": "bright pins",
+          "language": "csound",
+          "sync": true,
+          "tempo": 96,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.22,
+          "muted": false,
+          "soloed": false,
+          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n ktrack chnget \"hostTrackGain\"\n kstate chnget \"hostStateGain\"\n a1 oscili kgain * 0.22 * ktrack * kstate, kfreq * 9, giSine\n outs a1, a1\nendin",
+          "gainEvents": []
+        },
+        {
+          "name": "wide fifth",
+          "language": "supercollider",
+          "sync": true,
+          "tempo": 96,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.25,
+          "muted": false,
+          "soloed": false,
+          "code": "{ |freq = 220, gain = 0.08, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 84, stateBeat = 0, globalBeat = 0, timeSigNumerator = 5, timeSigDenominator = 4, barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1| var s = SinOsc.ar(freq * [1, 1.5, 2.0], 0, gain * [0.45, 0.25, 0.18]).sum; (s * stateGain * trackGain).dup }",
+          "gainEvents": []
+        },
+        {
+          "name": "soft pulse",
+          "language": "chuck",
+          "sync": true,
+          "tempo": 96,
+          "timeSigNumerator": 5,
+          "timeSigDenominator": 4,
+          "phase": 0,
+          "gain": 0.21,
+          "muted": false,
+          "soloed": false,
+          "code": "SinOsc p => Gain g => dac;\nwhile (true) { 330 => p.freq; Math.exp(-(hostStateBeat - Math.floor(hostStateBeat)) * 7) * 0.13 * hostStateGain * hostTrackGain => g.gain; 1::samp => now; }",
+          "gainEvents": []
+        }
+      ]
+    }
   ]
 }

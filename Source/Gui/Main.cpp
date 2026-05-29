@@ -826,40 +826,40 @@ juce::String defaultChucKScoreScript()
            "meter(4, 4);\n"
            "state.add(\"60Hz Room\", 32, 2);\n"
            "track.add(1, \"ChucK 60Hz gabber kick\", \"chuck\");\n"
-           "track.gain(1, 1, 0.86);\n"
+           "track.gain(1, 1, 0.50);\n"
            "track.add(1, \"Offbeat hoover stab\", \"chuck\");\n"
-           "track.gain(1, 2, 0.34);\n"
+           "track.gain(1, 2, 0.36);\n"
            "track.add(1, \"Csound hard edge\", \"csound\");\n"
-           "track.gain(1, 3, 0.36);\n"
+           "track.gain(1, 3, 0.30);\n"
            "track.add(1, \"Sub pressure\", \"chuck\");\n"
-           "track.gain(1, 4, 0.44);\n"
+           "track.gain(1, 4, 0.34);\n"
            "state.add(\"Hoover Lift\", 32, 4);\n"
            "track.add(2, \"SC gabber hoover\", \"supercollider\");\n"
-           "track.gain(2, 1, 0.40);\n"
+           "track.gain(2, 1, 0.34);\n"
            "track.add(2, \"ChucK detuned hoover\", \"chuck\");\n"
-           "track.gain(2, 2, 0.34);\n"
+           "track.gain(2, 2, 0.30);\n"
            "track.add(2, \"Syncopated heavy bass\", \"chuck\");\n"
-           "track.gain(2, 3, 0.50);\n"
+           "track.gain(2, 3, 0.36);\n"
            "track.add(2, \"ChucK siren pin\", \"chuck\");\n"
-           "track.gain(2, 4, 0.24);\n"
+           "track.gain(2, 4, 0.22);\n"
            "state.add(\"Rumble Break\", 48, 4);\n"
            "track.add(3, \"RTcmix 60Hz rumble\", \"rtcmix\");\n"
-           "track.gain(3, 1, 0.42);\n"
+           "track.gain(3, 1, 0.44);\n"
            "track.add(3, \"ChucK pedal hammer\", \"chuck\");\n"
-           "track.gain(3, 2, 0.48);\n"
+           "track.gain(3, 2, 0.28);\n"
            "track.add(3, \"ChucK broken kick\", \"chuck\");\n"
-           "track.gain(3, 3, 0.70);\n"
+           "track.gain(3, 3, 0.38);\n"
            "track.add(3, \"ChucK low hoover\", \"chuck\");\n"
            "track.gain(3, 4, 0.28);\n"
            "state.add(\"Strobe Coda\", 24, 2);\n"
            "track.add(4, \"ChucK coda stab\", \"chuck\");\n"
-           "track.gain(4, 1, 0.52);\n"
+           "track.gain(4, 1, 0.40);\n"
            "track.add(4, \"ChucK coda hoover\", \"chuck\");\n"
            "track.gain(4, 2, 0.34);\n"
            "track.add(4, \"Csound closing rave\", \"csound\");\n"
-           "track.gain(4, 3, 0.40);\n"
+           "track.gain(4, 3, 0.34);\n"
            "track.add(4, \"ChucK floor siren\", \"chuck\");\n"
-           "track.gain(4, 4, 0.46);\n"
+           "track.gain(4, 4, 0.30);\n"
            "state.connect(1, 2, 70);\n"
            "state.connect(1, 3, 30);\n"
            "state.connect(2, 3, 50);\n"
@@ -1045,7 +1045,9 @@ TrackModel makeTrack (juce::String name, Language language)
     {
         if (track.name.containsIgnoreCase ("syncopated") || track.name.containsIgnoreCase ("heavy bass"))
             track.code = demoChucKSyncopatedBassCode();
-        else if (track.name.containsIgnoreCase ("kick") || track.name.containsIgnoreCase ("hammer") || track.name.containsIgnoreCase ("pressure"))
+        else if (track.name.containsIgnoreCase ("pressure"))
+            track.code = demoChucKSyncopatedBassCode();
+        else if (track.name.containsIgnoreCase ("kick") || track.name.containsIgnoreCase ("hammer"))
             track.code = demoChucKMotifCode();
         else if (track.name.containsIgnoreCase ("coda") || track.name.containsIgnoreCase ("siren") || track.name.containsIgnoreCase ("answer"))
             track.code = demoChucKCodaCode();
@@ -1099,10 +1101,10 @@ ProjectModel makeInitialProject()
     chuck.tailBeats = 2.0;
     chuck.canvasX = 70;
     chuck.canvasY = 160;
-    chuck.tracks.push_back (makeDemoTrack ("ChucK 60Hz gabber kick", Language::chuck, 0.86f, demoChucKMotifCode()));
-    chuck.tracks.push_back (makeDemoTrack ("Offbeat hoover stab", Language::chuck, 0.34f, demoChucKLayerCode (8.0, 0.055, 0.20, 2)));
-    chuck.tracks.push_back (makeDemoTrack ("Csound hard edge", Language::csound, 0.36f, demoCsoundBellCode()));
-    chuck.tracks.push_back (makeDemoTrack ("Sub pressure", Language::chuck, 0.44f, demoChucKMotifCode()));
+    chuck.tracks.push_back (makeDemoTrack ("ChucK 60Hz gabber kick", Language::chuck, 0.50f, demoChucKMotifCode()));
+    chuck.tracks.push_back (makeDemoTrack ("Offbeat hoover stab", Language::chuck, 0.36f, demoChucKLayerCode (8.0, 0.055, 0.20, 2)));
+    chuck.tracks.push_back (makeDemoTrack ("Csound hard edge", Language::csound, 0.30f, demoCsoundBellCode()));
+    chuck.tracks.push_back (makeDemoTrack ("Sub pressure", Language::chuck, 0.34f, demoChucKSyncopatedBassCode()));
 
     StateModel sc;
     sc.name = "Hoover Lift";
@@ -1110,10 +1112,10 @@ ProjectModel makeInitialProject()
     sc.tailBeats = 4.0;
     sc.canvasX = 330;
     sc.canvasY = 60;
-    sc.tracks.push_back (makeDemoTrack ("SC gabber hoover", Language::supercollider, 0.40f, demoSuperColliderHarmonicCode()));
-    sc.tracks.push_back (makeDemoTrack ("ChucK detuned hoover", Language::chuck, 0.34f, demoChucKLayerCode (4.0, 0.060, 0.26, 1)));
-    sc.tracks.push_back (makeDemoTrack ("Syncopated heavy bass", Language::chuck, 0.50f, demoChucKSyncopatedBassCode()));
-    sc.tracks.push_back (makeDemoTrack ("ChucK siren pin", Language::chuck, 0.24f, demoChucKLayerCode (8.0, 0.050, 0.28, 5)));
+    sc.tracks.push_back (makeDemoTrack ("SC gabber hoover", Language::supercollider, 0.34f, demoSuperColliderHarmonicCode()));
+    sc.tracks.push_back (makeDemoTrack ("ChucK detuned hoover", Language::chuck, 0.30f, demoChucKLayerCode (4.0, 0.060, 0.26, 1)));
+    sc.tracks.push_back (makeDemoTrack ("Syncopated heavy bass", Language::chuck, 0.36f, demoChucKSyncopatedBassCode()));
+    sc.tracks.push_back (makeDemoTrack ("ChucK siren pin", Language::chuck, 0.22f, demoChucKLayerCode (8.0, 0.050, 0.28, 5)));
 
     StateModel rtcmix;
     rtcmix.name = "Rumble Break";
@@ -1121,9 +1123,9 @@ ProjectModel makeInitialProject()
     rtcmix.tailBeats = 4.0;
     rtcmix.canvasX = 330;
     rtcmix.canvasY = 230;
-    rtcmix.tracks.push_back (makeDemoTrack ("RTcmix 60Hz rumble", Language::rtcmix, 0.42f, demoRTcmixBassCode()));
-    rtcmix.tracks.push_back (makeDemoTrack ("ChucK pedal hammer", Language::chuck, 0.48f, demoChucKMotifCode()));
-    rtcmix.tracks.push_back (makeDemoTrack ("ChucK broken kick", Language::chuck, 0.70f, demoChucKMotifCode()));
+    rtcmix.tracks.push_back (makeDemoTrack ("RTcmix 60Hz rumble", Language::rtcmix, 0.44f, demoRTcmixBassCode()));
+    rtcmix.tracks.push_back (makeDemoTrack ("ChucK pedal hammer", Language::chuck, 0.28f, demoChucKMotifCode()));
+    rtcmix.tracks.push_back (makeDemoTrack ("ChucK broken kick", Language::chuck, 0.38f, demoChucKMotifCode()));
     rtcmix.tracks.push_back (makeDemoTrack ("ChucK low hoover", Language::chuck, 0.28f, demoChucKLayerCode (0.5, 0.070, 0.12, 4)));
 
     StateModel coda;
@@ -1132,10 +1134,10 @@ ProjectModel makeInitialProject()
     coda.tailBeats = 2.0;
     coda.canvasX = 590;
     coda.canvasY = 160;
-    coda.tracks.push_back (makeDemoTrack ("ChucK coda stab", Language::chuck, 0.52f, demoChucKCodaCode()));
+    coda.tracks.push_back (makeDemoTrack ("ChucK coda stab", Language::chuck, 0.40f, demoChucKCodaCode()));
     coda.tracks.push_back (makeDemoTrack ("ChucK coda hoover", Language::chuck, 0.34f, demoChucKLayerCode (4.0, 0.058, 0.22, 1)));
-    coda.tracks.push_back (makeDemoTrack ("Csound closing rave", Language::csound, 0.40f, demoCsoundBellCode()));
-    coda.tracks.push_back (makeDemoTrack ("ChucK floor siren", Language::chuck, 0.46f, demoChucKCodaCode()));
+    coda.tracks.push_back (makeDemoTrack ("Csound closing rave", Language::csound, 0.34f, demoCsoundBellCode()));
+    coda.tracks.push_back (makeDemoTrack ("ChucK floor siren", Language::chuck, 0.30f, demoChucKCodaCode()));
 
     project.states.push_back (std::move (chuck));
     project.states.push_back (std::move (sc));
@@ -3129,11 +3131,33 @@ private:
             fader.setValue (gainToDb (track.level), juce::dontSendNotification);
             fader.onValueChange = [this]
             {
-                track.level = dbToGain (static_cast<float> (fader.getValue()));
-                repaint();
-                notifyControlChange();
+                if (! updatingValueControls)
+                    setTrackGainDb (static_cast<float> (fader.getValue()), true);
             };
             addAndMakeVisible (fader);
+
+            valueEditor.setEditable (true, true, false);
+            valueEditor.setJustificationType (juce::Justification::centred);
+            valueEditor.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            valueEditor.setColour (juce::Label::backgroundColourId, juce::Colour (0xff101211).withAlpha (0.88f));
+            valueEditor.setColour (juce::Label::outlineColourId, juce::Colour (0xff73827d));
+            valueEditor.setColour (juce::Label::textColourId, juce::Colour (0xffdce3e1));
+            valueEditor.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xff0b0f0e));
+            valueEditor.setColour (juce::TextEditor::textColourId, juce::Colour (0xffe6eee9));
+            valueEditor.onTextChange = [this]
+            {
+                if (updatingValueControls)
+                    return;
+
+                auto parsedDb = 0.0f;
+                if (! parseGainDbText (valueEditor.getText(), parsedDb))
+                    return;
+
+                setTrackGainDb (parsedDb, true);
+            };
+            valueEditor.onEditorHide = [this] { refreshValueEditor(); };
+            addAndMakeVisible (valueEditor);
+            refreshValueEditor();
 
             mute.setButtonText ("M");
             mute.setToggleState (track.muted, juce::dontSendNotification);
@@ -3235,15 +3259,6 @@ private:
                 g.fillRect (meter.withHeight (4));
             }
 
-            auto value = getValueBounds();
-            g.setColour (juce::Colour (0xff101211).withAlpha (0.82f));
-            g.fillRect (value);
-            g.setColour (juce::Colour (0xff73827d));
-            g.drawRect (value, 1);
-            g.setColour (juce::Colour (0xffdce3e1));
-            g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-            g.drawText (dbLabel (gainToDb (track.level)), value, juce::Justification::centred, true);
-
             if (track.muted || track.soloed)
             {
                 g.setColour (track.soloed ? juce::Colour (0xfffff0a8) : juce::Colour (0xffd58b73));
@@ -3257,6 +3272,7 @@ private:
             mute.setBounds (buttons.removeFromLeft (buttons.getWidth() / 2).reduced (2, 0));
             solo.setBounds (buttons.reduced (2, 0));
             fader.setBounds (getFaderBounds());
+            valueEditor.setBounds (getValueBounds());
         }
 
         void mouseDoubleClick (const juce::MouseEvent& event) override
@@ -3297,6 +3313,44 @@ private:
                 onControlChange();
         }
 
+        static bool parseGainDbText (juce::String text, float& db)
+        {
+            text = text.trim().toLowerCase().removeCharacters ("db");
+            if (text.isEmpty() || text == "-" || text == "+" || text == "." || text == "-." || text == "+.")
+                return false;
+
+            if (text.contains ("inf"))
+            {
+                db = minimumMeterDb;
+                return true;
+            }
+
+            const auto value = text.getFloatValue();
+            if (! std::isfinite (value))
+                return false;
+
+            db = juce::jlimit (minimumMeterDb, maximumMixerGainDb, value);
+            return true;
+        }
+
+        void setTrackGainDb (float db, bool notify)
+        {
+            const juce::ScopedValueSetter<bool> setter (updatingValueControls, true);
+            const auto limitedDb = juce::jlimit (minimumMeterDb, maximumMixerGainDb, db);
+            track.level = dbToGain (limitedDb);
+            fader.setValue (limitedDb, juce::dontSendNotification);
+            refreshValueEditor();
+            repaint();
+
+            if (notify)
+                notifyControlChange();
+        }
+
+        void refreshValueEditor()
+        {
+            valueEditor.setText (dbLabel (gainToDb (track.level)), juce::dontSendNotification);
+        }
+
         TrackModel& track;
         juce::String stateName;
         int stateIndex = -1;
@@ -3307,9 +3361,11 @@ private:
         std::function<void (TrackModel&, const juce::String&)> onEditProcessor;
         std::function<void()> onControlChange;
         juce::Slider fader;
+        juce::Label valueEditor;
         juce::TextButton mute;
         juce::TextButton solo;
         mutable juce::Rectangle<int> processorSlot;
+        bool updatingValueControls = false;
     };
 
     class MasterChannel final : public juce::Component
@@ -3936,7 +3992,7 @@ public:
 
     juce::StringArray getMenuBarNames() override
     {
-        return { "File" };
+        return { "File", "View" };
     }
 
     juce::PopupMenu getMenuForIndex (int menuIndex, const juce::String&) override
@@ -3955,6 +4011,12 @@ public:
             menu.addSeparator();
             menu.addItem (menuItemWithShortcut (menuExportStems, "Export Stems...", "Cmd+E"));
         }
+        else if (menuIndex == 1)
+        {
+            menu.addItem (menuItemWithShortcut (menuViewMain, "Main", "Cmd+1"));
+            menu.addItem (menuItemWithShortcut (menuViewArrangement, "Arrangement", "Cmd+2"));
+            menu.addItem (menuItemWithShortcut (menuViewMixer, "Mixer", "Cmd+3"));
+        }
 
         return menu;
     }
@@ -3967,6 +4029,9 @@ public:
             case menuSaveAs: saveProjectAs(); break;
             case menuOpen: openProject(); break;
             case menuExportStems: exportStems(); break;
+            case menuViewMain: showBottomView (BottomView::stateTabs); break;
+            case menuViewArrangement: showBottomView (BottomView::arrangement); break;
+            case menuViewMixer: showBottomView (BottomView::mixer); break;
             default:
                 if (menuItemID >= menuExampleBase)
                     openExampleProject (menuItemID - menuExampleBase);
@@ -4006,12 +4071,29 @@ public:
                 exportStems();
                 return true;
             }
+
+            if (character == '1')
+            {
+                showBottomView (BottomView::stateTabs);
+                return true;
+            }
+
+            if (character == '2')
+            {
+                showBottomView (BottomView::arrangement);
+                return true;
+            }
+
+            if (character == '3')
+            {
+                showBottomView (BottomView::mixer);
+                return true;
+            }
         }
 
         if (key.getTextCharacter() == 'm' || key.getTextCharacter() == 'M')
         {
-            mixerVisible = ! mixerVisible;
-            layoutBottomView();
+            showBottomView (mixerVisible ? BottomView::stateTabs : BottomView::mixer);
             return true;
         }
 
@@ -4046,6 +4128,9 @@ private:
     static constexpr int menuSaveAs = 2;
     static constexpr int menuOpen = 3;
     static constexpr int menuExportStems = 4;
+    static constexpr int menuViewMain = 5;
+    static constexpr int menuViewArrangement = 6;
+    static constexpr int menuViewMixer = 7;
     static constexpr int menuExampleBase = 100;
 
     static juce::PopupMenu::Item menuItemWithShortcut (int itemId, juce::String text, juce::String shortcut)
@@ -4947,9 +5032,15 @@ private:
 
         tabs.setCurrentTabIndex (index);
         score.setSelectedStateIndex (index);
-        currentView = BottomView::stateTabs;
-        mixerVisible = false;
+        showBottomView (BottomView::stateTabs);
+    }
+
+    void showBottomView (BottomView view)
+    {
+        currentView = view;
+        mixerVisible = view == BottomView::mixer;
         layoutBottomView();
+        updateTransportViews();
     }
 
     void syncChucKScoreScriptFromProject()
@@ -5080,7 +5171,6 @@ private:
         currentBeat = 0.0;
         audio.stop();
         currentView = BottomView::stateTabs;
-        mixerVisible = false;
     }
 
     void refreshStructure (int preferredTab)
@@ -5126,9 +5216,7 @@ private:
         currentBeat = 0.0;
         project.arrangementOrder = resolveProbabilisticArrangement (project);
         audio.loadProject (project);
-        currentView = BottomView::arrangement;
-        layoutBottomView();
-        updateTransportViews();
+        showBottomView (BottomView::arrangement);
     }
 
     void stopPlayback()
@@ -5138,9 +5226,7 @@ private:
         countInBeat = 0.0;
         currentBeat = 0.0;
         audio.stop();
-        currentView = BottomView::stateTabs;
-        layoutBottomView();
-        updateTransportViews();
+        showBottomView (BottomView::stateTabs);
     }
 
     void timerCallback() override
@@ -5758,8 +5844,7 @@ private:
                 break;
 
             case ScoreCommandId::mixer:
-                mixerVisible = args[0] != 0.0;
-                layoutBottomView();
+                showBottomView (args[0] != 0.0 ? BottomView::mixer : BottomView::stateTabs);
                 break;
 
             case ScoreCommandId::none:
@@ -5833,11 +5918,9 @@ private:
 
     void layoutBottomView()
     {
-        const auto view = mixerVisible ? BottomView::mixer : currentView;
-
-        tabs.setVisible (view == BottomView::stateTabs);
-        arrangement.setVisible (view == BottomView::arrangement);
-        mixer.setVisible (view == BottomView::mixer);
+        tabs.setVisible (currentView == BottomView::stateTabs);
+        arrangement.setVisible (currentView == BottomView::arrangement);
+        mixer.setVisible (currentView == BottomView::mixer);
 
         tabs.setBounds (bottomBounds);
         arrangement.setBounds (bottomBounds);

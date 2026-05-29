@@ -100,7 +100,17 @@ cmake --build build --target AlchemyGui --config Release
 open "build/AlchemyGui_artefacts/Release/Alchemy.app"
 ```
 
-Its top third keeps the score/state visualization: state nodes, inlet/outlet-style transition cords, state add/remove controls, and a compact transport strip. ChucK is the score editor in this area; edit the score script and press `Run` to compile it in an embedded ChucK VM that drives the score/state machine through a host command bridge. The score bridge captures command sample frames from ChucK's own `now`, builds exact tempo, meter, phase, stop, and track gain schedules, then starts playback from that prepared audio timeline instead of relying on the GUI timer. Press `Sync` to regenerate the ChucK score from the current GUI states/tracks, `Template` to restore the starter score, or `Clear` to empty the score pane. The lower two thirds switch between per-state track tabs, an arrangement view during count-in/playback, and a mixer view. Each state tab has track add/remove controls. Each track stores an accepted language program and defaults to tight global timing while allowing local tempo, meter, and phase overrides. If an optional native backend cannot prepare or rejects a program, the GUI logs the native failure and retries that sequence with ChucK fallback tracks so the arrangement remains audible.
+Its top third keeps the score/state visualization: state nodes, inlet/outlet-style transition cords, state add/remove controls, and a compact transport strip. ChucK is the score editor in this area; edit the score script and press `Run` to compile it in an embedded ChucK VM that drives the score/state machine through a host command bridge. The score bridge captures command sample frames from ChucK's own `now`, builds exact tempo, meter, phase, stop, and track gain schedules, then starts playback from that prepared audio timeline instead of relying on the GUI timer. Press `Sync` to regenerate the ChucK score from the current GUI states/tracks, `Template` to restore the starter score, or `Clear` to empty the score pane. The lower two thirds switch between per-state track tabs, an arrangement view during count-in/playback, and a mixer view. Each state tab has track add/remove controls. Each track stores an accepted language program and defaults to tight global timing while allowing local tempo, meter, and phase overrides. The File menu can save/open `.alchemy` projects, open the bundled example projects, and export WAVs as all stems, current-state stems, a master mix, or stems plus master with sample-rate, bit-depth, channel, duration, naming, mute, tail, and headroom options. If an optional native backend cannot prepare or rejects a program, the GUI logs the native failure and retries that sequence with ChucK fallback tracks so the arrangement remains audible.
+
+The examples are copied into the app bundle at build time and are also available in the repository `Examples/` folder.
+
+For a repeatable macOS release zip:
+
+```sh
+scripts/package_macos_release.sh 0.1.1
+```
+
+The package script rebuilds the GUI, copies the example projects, copies any local optional Csound/RTcmix/SuperCollider runtime libraries it can find into `Alchemy.app/Contents/Frameworks`, writes a dependency manifest, and creates `dist/Alchemy-v<version>-macOS.zip`.
 
 The score VM exposes `score`, `state`, and `track` APIs inside ChucK. String arguments are marshalled to the host bridge, while timing, loops, functions, and conditionals are ordinary ChucK:
 

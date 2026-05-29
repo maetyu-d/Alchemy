@@ -1,0 +1,20 @@
+{
+  "format": "alchemy",
+  "version": 1,
+  "globalTempoBpm": 132,
+  "globalTimeSigNumerator": 7,
+  "globalTimeSigDenominator": 8,
+  "globalPhaseBeats": 0.5,
+  "scheduledStopBeat": -1,
+  "loopPlayback": true,
+  "chuckScoreScript": "score.clear();\ntempo(132);\nmeter(7, 8);\nphase(0.5);\nstate.add(\"Seven\", 28, 3);\ntrack.add(1, \"seven pulse\", \"chuck\");\nstate.add(\"Five\", 20, 5);\ntrack.add(2, \"five answer\", \"chuck\");\nstate.add(\"Eleven\", 22, 5);\ntrack.add(3, \"eleven shimmer\", \"supercollider\");\nstate.connect(1, 2, 60);\nstate.connect(1, 3, 40);\nstate.connect(2, 1, 25);\nstate.connect(2, 3, 75);\nplay();",
+  "tempoMap": [],
+  "timeSignatureMap": [{"beat": 0, "numerator": 7, "denominator": 8}, {"beat": 48, "numerator": 5, "denominator": 4}],
+  "phaseRotationMap": [{"beat": 0, "rotationBeats": 0.5}],
+  "arrangementOrder": [0, 1, 0, 2],
+  "states": [
+    {"name": "Seven", "durationBeats": 28, "tailBeats": 3, "canvasX": 80, "canvasY": 150, "transitions": [{"targetStateIndex": 1, "weight": 60}, {"targetStateIndex": 2, "weight": 40}], "tracks": [{"name": "seven pulse", "language": "chuck", "sync": true, "tempo": 132, "timeSigNumerator": 7, "timeSigDenominator": 8, "phase": 0, "gain": 0.44, "muted": false, "soloed": false, "code": "SinOsc s => Gain g => dac;\nwhile (true) { 196 => s.freq; 0.28 => g.gain; 80::ms => now; 0 => g.gain; 120::ms => now; }", "gainEvents": []}]},
+    {"name": "Five", "durationBeats": 20, "tailBeats": 5, "canvasX": 330, "canvasY": 70, "transitions": [{"targetStateIndex": 0, "weight": 25}, {"targetStateIndex": 2, "weight": 75}], "tracks": [{"name": "five answer", "language": "chuck", "sync": false, "tempo": 110, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0.25, "gain": 0.38, "muted": false, "soloed": false, "code": "TriOsc t => Gain g => dac;\nwhile (true) { 275 => t.freq; 0.22 => g.gain; 130::ms => now; 0 => g.gain; 170::ms => now; }", "gainEvents": []}]},
+    {"name": "Eleven", "durationBeats": 22, "tailBeats": 5, "canvasX": 590, "canvasY": 180, "transitions": [], "tracks": [{"name": "eleven shimmer", "language": "supercollider", "sync": true, "tempo": 132, "timeSigNumerator": 11, "timeSigDenominator": 8, "phase": 0, "gain": 0.30, "muted": false, "soloed": false, "code": "{ |freq = 440, gain = 0.1, blend = 0.5| SinOsc.ar(freq * [1, 1.5, 2.25], 0, gain * [0.6, 0.3, 0.2]).sum.dup }", "gainEvents": []}]}
+  ]
+}

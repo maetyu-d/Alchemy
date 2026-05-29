@@ -1202,6 +1202,33 @@ private:
             candidates.addIfNotAlreadyThere (path);
     }
 
+    static juce::File getBundleContentsDirectory()
+    {
+        const auto executableDirectory = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+        if (executableDirectory.getFileName() == "MacOS")
+            return executableDirectory.getParentDirectory();
+
+        return {};
+    }
+
+    static void addBundledLibraryCandidate (juce::StringArray& candidates, const juce::String& fileName)
+    {
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+            addLibraryCandidate (candidates, contents.getChildFile ("Frameworks").getChildFile (fileName).getFullPathName());
+    }
+
+    static void addBundledFrameworkCandidate (juce::StringArray& candidates, const juce::String& frameworkName, const juce::String& executableName)
+    {
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+            addLibraryCandidate (candidates,
+                                 contents.getChildFile ("Frameworks")
+                                         .getChildFile (frameworkName)
+                                         .getChildFile (executableName)
+                                         .getFullPathName());
+    }
+
     static juce::StringArray getCsoundLibraryCandidates()
     {
         juce::StringArray candidates;
@@ -1209,6 +1236,9 @@ private:
         if (const auto* envPath = std::getenv ("WELD_CSOUND_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledFrameworkCandidate (candidates, "CsoundLib64.framework", "CsoundLib64");
+        addBundledLibraryCandidate (candidates, "libcsound64.dylib");
+        addBundledLibraryCandidate (candidates, "libcsound.dylib");
         addLibraryCandidate (candidates, WELD_CSOUND_DEFAULT_LIBRARY);
         addLibraryCandidate (candidates, "build-csound/CsoundLib64.framework/CsoundLib64");
         addLibraryCandidate (candidates, "build-csound/libcsound64.dylib");
@@ -1909,6 +1939,22 @@ private:
             candidates.addIfNotAlreadyThere (path);
     }
 
+    static juce::File getBundleContentsDirectory()
+    {
+        const auto executableDirectory = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+        if (executableDirectory.getFileName() == "MacOS")
+            return executableDirectory.getParentDirectory();
+
+        return {};
+    }
+
+    static void addBundledLibraryCandidate (juce::StringArray& candidates, const juce::String& fileName)
+    {
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+            addLibraryCandidate (candidates, contents.getChildFile ("Frameworks").getChildFile (fileName).getFullPathName());
+    }
+
     static void addRootLibraryCandidates (juce::StringArray& candidates, const juce::File& root)
     {
         const auto sourceDirectory = root.getChildFile ("third_party")
@@ -1933,6 +1979,7 @@ private:
         if (const auto* envPath = std::getenv ("WELD_RTCMIX_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "librtcmix_embedded.dylib");
         addLibraryCandidate (candidates, WELD_RTCMIX_DEFAULT_LIBRARY);
 
         const auto addFromParents = [&candidates] (juce::File start)
@@ -3153,6 +3200,22 @@ private:
             candidates.addIfNotAlreadyThere (path);
     }
 
+    static juce::File getBundleContentsDirectory()
+    {
+        const auto executableDirectory = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory();
+        if (executableDirectory.getFileName() == "MacOS")
+            return executableDirectory.getParentDirectory();
+
+        return {};
+    }
+
+    static void addBundledLibraryCandidate (juce::StringArray& candidates, const juce::String& fileName)
+    {
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+            addLibraryCandidate (candidates, contents.getChildFile ("Frameworks").getChildFile (fileName).getFullPathName());
+    }
+
     static juce::StringArray getSuperColliderLibraryCandidates()
     {
         juce::StringArray candidates;
@@ -3160,6 +3223,7 @@ private:
         if (const auto* envPath = std::getenv ("WELD_SUPERCOLLIDER_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "libscsynth.dylib");
         addLibraryCandidate (candidates, WELD_SUPERCOLLIDER_DEFAULT_LIBRARY);
 
         const auto addFromParents = [&candidates] (juce::File start)
@@ -3199,6 +3263,7 @@ private:
         if (const auto* envPath = std::getenv ("WELD_SUPERCOLLIDER_LANG_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "libweldsclang.dylib");
         addLibraryCandidate (candidates, WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY);
 
         const auto addFromParents = [&candidates] (juce::File start)
@@ -3244,6 +3309,16 @@ private:
     {
         if (const auto* envPath = std::getenv ("WELD_SUPERCOLLIDER_PLUGIN_PATH"))
             return envPath;
+
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+        {
+            const auto bundledPlugins = contents.getChildFile ("Resources")
+                                         .getChildFile ("SuperCollider")
+                                         .getChildFile ("plugins");
+            if (bundledPlugins.isDirectory())
+                return bundledPlugins.getFullPathName();
+        }
 
         auto start = juce::File::getCurrentWorkingDirectory();
         for (;;)

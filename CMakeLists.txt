@@ -304,6 +304,11 @@ target_link_libraries(AlchemyGui
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+add_custom_command(TARGET AlchemyGui POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_CURRENT_SOURCE_DIR}/Examples"
+            "$<TARGET_BUNDLE_DIR:AlchemyGui>/Contents/Resources/Examples")
+
 add_executable(AlchemyEngineBoundaryTest
     Tests/EngineBoundaryTest.cpp)
 

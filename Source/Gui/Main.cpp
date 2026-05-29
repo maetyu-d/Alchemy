@@ -13,6 +13,8 @@
 #include <limits>
 #include <memory>
 #include <random>
+#include <set>
+#include <string>
 #include <vector>
 
 namespace
@@ -3945,6 +3947,11 @@ public:
             menu.addItem (menuItemWithShortcut (menuSave, "Save", "Cmd+S"));
             menu.addItem (menuItemWithShortcut (menuSaveAs, "Save As...", "Shift+Cmd+S"));
             menu.addItem (menuItemWithShortcut (menuOpen, "Open...", "Cmd+O"));
+            auto examples = juce::PopupMenu();
+            const auto names = exampleProjectNames();
+            for (int i = 0; i < names.size(); ++i)
+                examples.addItem (menuExampleBase + i, names[i].fromFirstOccurrenceOf (" ", false, false).upToLastOccurrenceOf (".alchemy", false, false));
+            menu.addSubMenu ("Open Example", examples, ! names.isEmpty());
             menu.addSeparator();
             menu.addItem (menuItemWithShortcut (menuExportStems, "Export Stems...", "Cmd+E"));
         }
@@ -3960,7 +3967,10 @@ public:
             case menuSaveAs: saveProjectAs(); break;
             case menuOpen: openProject(); break;
             case menuExportStems: exportStems(); break;
-            default: break;
+            default:
+                if (menuItemID >= menuExampleBase)
+                    openExampleProject (menuItemID - menuExampleBase);
+                break;
         }
     }
 
@@ -4036,6 +4046,7 @@ private:
     static constexpr int menuSaveAs = 2;
     static constexpr int menuOpen = 3;
     static constexpr int menuExportStems = 4;
+    static constexpr int menuExampleBase = 100;
 
     static juce::PopupMenu::Item menuItemWithShortcut (int itemId, juce::String text, juce::String shortcut)
     {
@@ -4055,6 +4066,14 @@ private:
 
     struct WavExportOptions
     {
+        enum class Target
+        {
+            allTrackStems,
+            currentStateStems,
+            masterMix,
+            stemsAndMaster
+        };
+
         enum class BitDepth
         {
             float32,
@@ -4062,10 +4081,20 @@ private:
             pcm16
         };
 
+        enum class Naming
+        {
+            numbered,
+            stateAndTrack,
+            trackThenState
+        };
+
         int sampleRate = 48000;
         int channels = 2;
         double durationSeconds = 0.0;
+        float headroomDb = 0.0f;
+        Target target = Target::allTrackStems;
         BitDepth bitDepth = BitDepth::float32;
+        Naming naming = Naming::numbered;
         bool includeTails = true;
         bool respectMutes = true;
     };
@@ -4172,6 +4201,75 @@ private:
         notifyDocumentState();
     }
 
+    static juce::StringArray exampleProjectNames()
+    {
+        return { "01 Gabber Rave.alchemy",
+                 "02 Ambient Branches.alchemy",
+                 "03 Polyrhythm Lab.alchemy" };
+    }
+
+    static juce::Array<juce::File> exampleDirectories()
+    {
+        juce::Array<juce::File> directories;
+        const auto executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+        const auto macOSDirectory = executable.getParentDirectory();
+        const auto contentsDirectory = macOSDirectory.getFileName() == "MacOS" ? macOSDirectory.getParentDirectory() : juce::File();
+
+        if (contentsDirectory != juce::File())
+            directories.add (contentsDirectory.getChildFile ("Resources").getChildFile ("Examples"));
+
+        directories.add (juce::File::getCurrentWorkingDirectory().getChildFile ("Examples"));
+        directories.add (juce::File::getSpecialLocation (juce::File::currentApplicationFile).getChildFile ("Contents").getChildFile ("Resources").getChildFile ("Examples"));
+        return directories;
+    }
+
+    static juce::File findExampleProjectFile (int exampleIndex)
+    {
+        const auto names = exampleProjectNames();
+        if (exampleIndex < 0 || exampleIndex >= names.size())
+            return {};
+
+        for (const auto& directory : exampleDirectories())
+        {
+            const auto file = directory.getChildFile (names[exampleIndex]);
+            if (file.existsAsFile())
+                return file;
+        }
+
+        return {};
+    }
+
+    void openExampleProject (int exampleIndex)
+    {
+        const auto file = findExampleProjectFile (exampleIndex);
+        if (file == juce::File())
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon,
+                                                    "Example missing",
+                                                    "Alchemy could not find that example project in the app bundle or repository Examples folder.");
+            return;
+        }
+
+        auto parsed = juce::JSON::parse (file);
+        ProjectModel loaded;
+        if (! projectFromVar (parsed, loaded))
+        {
+            juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::WarningIcon, "Open failed", "That example is not a valid Alchemy project.");
+            return;
+        }
+
+        stopPlayback();
+        project = std::move (loaded);
+        currentProjectFile = juce::File();
+        cleanProjectJson = projectToJson (project);
+        dirty = false;
+        score.setScoreScriptText (project.chuckScoreScript);
+        refreshStructure (0);
+        dirty = false;
+        cleanProjectJson = projectToJson (project);
+        notifyDocumentState();
+    }
+
     static int bytesPerSampleForExport (WavExportOptions::BitDepth bitDepth) noexcept
     {
         switch (bitDepth)
@@ -4247,6 +4345,11 @@ private:
         }
     }
 
+    static float exportHeadroomGain (const WavExportOptions& options) noexcept
+    {
+        return std::pow (10.0f, juce::jlimit (-24.0f, 0.0f, options.headroomDb) / 20.0f);
+    }
+
     static juce::String safeStemName (juce::String name)
     {
         name = name.retainCharacters ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_").trim();
@@ -4316,7 +4419,114 @@ private:
         return sequence;
     }
 
-    bool renderStemToFile (const juce::File& file, int stateIndex, int trackIndex, const WavExportOptions& options)
+    std::vector<EmbeddedPerformanceEngine::State> makeMasterExportSequence (const WavExportOptions& options) const
+    {
+        std::vector<EmbeddedPerformanceEngine::State> sequence;
+        const auto order = playableArrangementOrder (project);
+        sequence.reserve (order.size());
+
+        for (const auto stateIndex : order)
+        {
+            if (stateIndex < 0 || stateIndex >= static_cast<int> (project.states.size()))
+                continue;
+
+            const auto& state = project.states[static_cast<size_t> (stateIndex)];
+            EmbeddedPerformanceEngine::State performanceState;
+            performanceState.name = state.name;
+            performanceState.durationBeats = state.durationBeats;
+            performanceState.tailBeats = state.tailBeats;
+            performanceState.tracks.reserve (state.tracks.size());
+
+            for (int trackIndex = 0; trackIndex < static_cast<int> (state.tracks.size()); ++trackIndex)
+            {
+                const auto& track = state.tracks[static_cast<size_t> (trackIndex)];
+                const auto exportGain = (options.respectMutes && track.muted) ? 0.0f : juce::jlimit (0.0f, maximumMixerGainLinear, track.level);
+                performanceState.tracks.push_back ({ track.name,
+                                                     track.language,
+                                                     track.code,
+                                                     EmbeddedChucKEngine::getDefaultParameterBindings(),
+                                                     exportGain,
+                                                     track.tightlySynced,
+                                                     track.tempoBpm,
+                                                     track.timeSigNumerator,
+                                                     track.timeSigDenominator,
+                                                     track.phaseBeats,
+                                                     track.gainEvents,
+                                                     stateIndex,
+                                                     trackIndex });
+            }
+
+            if (! performanceState.tracks.empty())
+                sequence.push_back (std::move (performanceState));
+        }
+
+        return sequence;
+    }
+
+    bool prepareExportMasterProcessors (std::vector<std::unique_ptr<EmbeddedLanguageEngine>>& processors,
+                                        double sampleRate,
+                                        int blockSize,
+                                        juce::String& error) const
+    {
+        processors.clear();
+
+        for (const auto& processor : project.masterProcessors)
+        {
+            if (! processor.processorEnabled || processor.processorCode.trim().isEmpty())
+                continue;
+
+            auto engine = std::make_unique<EmbeddedLanguageEngine> (processor.processorLanguage);
+            if (! engine->prepare (sampleRate, blockSize, 2, 2))
+            {
+                error = "Master processor could not prepare "
+                        + EmbeddedLanguageEngine::getLanguageName (processor.processorLanguage)
+                        + ": "
+                        + engine->getLastError();
+                return false;
+            }
+
+            if (! engine->loadProgram (processor.processorCode,
+                                       EmbeddedPerformanceEngine::withPerformanceParameterBindings (EmbeddedChucKEngine::getDefaultParameterBindings())))
+            {
+                error = "Master processor could not load "
+                        + EmbeddedLanguageEngine::getLanguageName (processor.processorLanguage)
+                        + ": "
+                        + engine->getLastError();
+                return false;
+            }
+
+            processors.push_back (std::move (engine));
+        }
+
+        return true;
+    }
+
+    static void processExportMasterProcessors (std::vector<std::unique_ptr<EmbeddedLanguageEngine>>& processors,
+                                               juce::AudioBuffer<float>& output,
+                                               juce::AudioBuffer<float>& scratch)
+    {
+        if (processors.empty())
+            return;
+
+        auto* current = &output;
+        auto* next = &scratch;
+
+        for (auto& processor : processors)
+        {
+            next->clear();
+            processor->process (*current, *next);
+            std::swap (current, next);
+        }
+
+        if (current != &output)
+            for (int channel = 0; channel < output.getNumChannels(); ++channel)
+                output.copyFrom (channel, 0, *current, channel, 0, output.getNumSamples());
+    }
+
+    bool renderSequenceToFile (const juce::File& file,
+                               const std::vector<EmbeddedPerformanceEngine::State>& sequence,
+                               const WavExportOptions& options,
+                               bool includeMasterProcessors)
     {
         constexpr auto blockSize = 512;
         EmbeddedPerformanceEngine engine;
@@ -4335,7 +4545,13 @@ private:
         engine.setStopBeat (options.includeTails ? project.scheduledStopBeat : totalDurationBeats (project));
         engine.setLooping (false);
 
-        if (! engine.loadSequence (makeStemSequence (stateIndex, trackIndex, options)) || ! engine.start())
+        if (! engine.loadSequence (sequence) || ! engine.start())
+            return false;
+
+        std::vector<std::unique_ptr<EmbeddedLanguageEngine>> masterProcessors;
+        juce::String processorError;
+        if (includeMasterProcessors
+            && ! prepareExportMasterProcessors (masterProcessors, static_cast<double> (options.sampleRate), blockSize, processorError))
             return false;
 
         file.deleteFile();
@@ -4347,28 +4563,31 @@ private:
 
         juce::AudioBuffer<float> input;
         juce::AudioBuffer<float> output (2, blockSize);
+        juce::AudioBuffer<float> processorScratch (2, blockSize);
         const auto requestedFrames = options.durationSeconds > 0.0
                                        ? static_cast<uint64_t> (std::ceil (options.durationSeconds * static_cast<double> (options.sampleRate)))
                                        : std::numeric_limits<uint64_t>::max();
         uint32_t framesWritten = 0;
+        const auto headroomGain = exportHeadroomGain (options);
 
         while (engine.isPlaying() && static_cast<uint64_t> (framesWritten) < requestedFrames)
         {
             output.clear();
             engine.process (input, output);
+            processExportMasterProcessors (masterProcessors, output, processorScratch);
             const auto framesThisBlock = static_cast<int> (juce::jmin<uint64_t> (static_cast<uint64_t> (blockSize),
                                                                                  requestedFrames - static_cast<uint64_t> (framesWritten)));
             for (int sample = 0; sample < framesThisBlock; ++sample)
             {
                 if (options.channels == 1)
                 {
-                    const auto mono = (output.getSample (0, sample) + output.getSample (1, sample)) * 0.5f;
+                    const auto mono = (output.getSample (0, sample) + output.getSample (1, sample)) * 0.5f * headroomGain;
                     writeExportSample (*stream, mono, options.bitDepth);
                 }
                 else
                 {
-                    writeExportSample (*stream, output.getSample (0, sample), options.bitDepth);
-                    writeExportSample (*stream, output.getSample (1, sample), options.bitDepth);
+                    writeExportSample (*stream, output.getSample (0, sample) * headroomGain, options.bitDepth);
+                    writeExportSample (*stream, output.getSample (1, sample) * headroomGain, options.bitDepth);
                 }
             }
 
@@ -4381,6 +4600,16 @@ private:
         return stream->getStatus().wasOk();
     }
 
+    bool renderStemToFile (const juce::File& file, int stateIndex, int trackIndex, const WavExportOptions& options)
+    {
+        return renderSequenceToFile (file, makeStemSequence (stateIndex, trackIndex, options), options, false);
+    }
+
+    bool renderMasterMixToFile (const juce::File& file, const WavExportOptions& options)
+    {
+        return renderSequenceToFile (file, makeMasterExportSequence (options), options, true);
+    }
+
     void exportStems()
     {
         showStemExportOptions();
@@ -4391,9 +4620,12 @@ private:
         exportOptionsWindow = std::make_unique<juce::AlertWindow> ("Export WAV stems",
                                                                    "Choose how Alchemy should render the stem files.",
                                                                    juce::AlertWindow::NoIcon);
+        exportOptionsWindow->addComboBox ("target", { "All track stems", "Current state stems", "Master mix", "Track stems + master mix" }, "Export");
         exportOptionsWindow->addComboBox ("sampleRate", { "44.1 kHz", "48 kHz", "96 kHz" }, "Sample rate");
         exportOptionsWindow->addComboBox ("bitDepth", { "32-bit float", "24-bit PCM", "16-bit PCM" }, "Format");
         exportOptionsWindow->addComboBox ("channels", { "Stereo", "Mono" }, "Channels");
+        exportOptionsWindow->addComboBox ("naming", { "Numbered", "State - Track", "Track (State)" }, "Names");
+        exportOptionsWindow->addComboBox ("headroom", { "0 dB", "-3 dB", "-6 dB", "-12 dB" }, "Headroom");
         exportOptionsWindow->addTextEditor ("durationSeconds",
                                             lastWavExportOptions.durationSeconds > 0.0 ? juce::String (lastWavExportOptions.durationSeconds, 2) : juce::String(),
                                             "Duration seconds");
@@ -4407,6 +4639,18 @@ private:
         exportOptionsWindow->addCustomComponent (respectMutesExportToggle.get());
         exportOptionsWindow->addButton ("Export", 1, juce::KeyPress (juce::KeyPress::returnKey));
         exportOptionsWindow->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+        if (auto* combo = exportOptionsWindow->getComboBoxComponent ("target"))
+        {
+            auto selectedId = 1;
+            if (lastWavExportOptions.target == WavExportOptions::Target::currentStateStems)
+                selectedId = 2;
+            else if (lastWavExportOptions.target == WavExportOptions::Target::masterMix)
+                selectedId = 3;
+            else if (lastWavExportOptions.target == WavExportOptions::Target::stemsAndMaster)
+                selectedId = 4;
+            combo->setSelectedId (selectedId);
+        }
 
         if (auto* combo = exportOptionsWindow->getComboBoxComponent ("sampleRate"))
             combo->setSelectedId (lastWavExportOptions.sampleRate == 44100 ? 1 : (lastWavExportOptions.sampleRate == 96000 ? 3 : 2));
@@ -4423,6 +4667,28 @@ private:
 
         if (auto* combo = exportOptionsWindow->getComboBoxComponent ("channels"))
             combo->setSelectedId (lastWavExportOptions.channels == 1 ? 2 : 1);
+
+        if (auto* combo = exportOptionsWindow->getComboBoxComponent ("naming"))
+        {
+            auto selectedId = 1;
+            if (lastWavExportOptions.naming == WavExportOptions::Naming::stateAndTrack)
+                selectedId = 2;
+            else if (lastWavExportOptions.naming == WavExportOptions::Naming::trackThenState)
+                selectedId = 3;
+            combo->setSelectedId (selectedId);
+        }
+
+        if (auto* combo = exportOptionsWindow->getComboBoxComponent ("headroom"))
+        {
+            auto selectedId = 1;
+            if (lastWavExportOptions.headroomDb <= -11.9f)
+                selectedId = 4;
+            else if (lastWavExportOptions.headroomDb <= -5.9f)
+                selectedId = 3;
+            else if (lastWavExportOptions.headroomDb <= -2.9f)
+                selectedId = 2;
+            combo->setSelectedId (selectedId);
+        }
 
         if (auto* editor = exportOptionsWindow->getTextEditor ("durationSeconds"))
         {
@@ -4464,6 +4730,17 @@ private:
             }
         }
 
+        if (auto* combo = window.getComboBoxComponent ("target"))
+        {
+            switch (combo->getSelectedId())
+            {
+                case 2: options.target = WavExportOptions::Target::currentStateStems; break;
+                case 3: options.target = WavExportOptions::Target::masterMix; break;
+                case 4: options.target = WavExportOptions::Target::stemsAndMaster; break;
+                default: options.target = WavExportOptions::Target::allTrackStems; break;
+            }
+        }
+
         if (auto* combo = window.getComboBoxComponent ("bitDepth"))
         {
             switch (combo->getSelectedId())
@@ -4476,6 +4753,27 @@ private:
 
         if (auto* combo = window.getComboBoxComponent ("channels"))
             options.channels = combo->getSelectedId() == 2 ? 1 : 2;
+
+        if (auto* combo = window.getComboBoxComponent ("naming"))
+        {
+            switch (combo->getSelectedId())
+            {
+                case 2: options.naming = WavExportOptions::Naming::stateAndTrack; break;
+                case 3: options.naming = WavExportOptions::Naming::trackThenState; break;
+                default: options.naming = WavExportOptions::Naming::numbered; break;
+            }
+        }
+
+        if (auto* combo = window.getComboBoxComponent ("headroom"))
+        {
+            switch (combo->getSelectedId())
+            {
+                case 2: options.headroomDb = -3.0f; break;
+                case 3: options.headroomDb = -6.0f; break;
+                case 4: options.headroomDb = -12.0f; break;
+                default: options.headroomDb = 0.0f; break;
+            }
+        }
 
         options.durationSeconds = juce::jmax (0.0, window.getTextEditorContents ("durationSeconds").trim().getDoubleValue());
 
@@ -4507,24 +4805,82 @@ private:
     {
         folder.createDirectory();
         auto exported = 0;
+        std::set<std::string> usedNames;
 
-        for (int stateIndex = 0; stateIndex < static_cast<int> (project.states.size()); ++stateIndex)
+        const auto makeUnique = [&usedNames] (juce::String fileName)
         {
-            const auto& state = project.states[static_cast<size_t> (stateIndex)];
-            for (int trackIndex = 0; trackIndex < static_cast<int> (state.tracks.size()); ++trackIndex)
+            auto candidate = fileName;
+            auto suffix = 2;
+            while (usedNames.find (candidate.toStdString()) != usedNames.end())
             {
-                const auto& track = state.tracks[static_cast<size_t> (trackIndex)];
-                const auto file = folder.getChildFile (juce::String (stateIndex + 1).paddedLeft ('0', 2)
-                                                       + "_"
-                                                       + safeStemName (state.name)
-                                                       + "_"
-                                                       + juce::String (trackIndex + 1).paddedLeft ('0', 2)
-                                                       + "_"
-                                                       + safeStemName (track.name)
-                                                       + ".wav");
-                if (renderStemToFile (file, stateIndex, trackIndex, options))
-                    ++exported;
+                candidate = fileName.upToLastOccurrenceOf (".wav", false, true)
+                            + " "
+                            + juce::String (suffix++)
+                            + ".wav";
             }
+
+            usedNames.insert (candidate.toStdString());
+            return candidate;
+        };
+
+        const auto stemFileName = [&options, &makeUnique] (int stateIndex, const StateModel& state, int trackIndex, const TrackModel& track)
+        {
+            juce::String name;
+            switch (options.naming)
+            {
+                case WavExportOptions::Naming::stateAndTrack:
+                    name = safeStemName (state.name) + " - " + safeStemName (track.name) + ".wav";
+                    break;
+
+                case WavExportOptions::Naming::trackThenState:
+                    name = safeStemName (track.name) + " (" + safeStemName (state.name) + ").wav";
+                    break;
+
+                case WavExportOptions::Naming::numbered:
+                    name = juce::String (stateIndex + 1).paddedLeft ('0', 2)
+                           + "_"
+                           + safeStemName (state.name)
+                           + "_"
+                           + juce::String (trackIndex + 1).paddedLeft ('0', 2)
+                           + "_"
+                           + safeStemName (track.name)
+                           + ".wav";
+                    break;
+            }
+
+            return makeUnique (name);
+        };
+
+        const auto shouldExportStems = options.target == WavExportOptions::Target::allTrackStems
+                                    || options.target == WavExportOptions::Target::currentStateStems
+                                    || options.target == WavExportOptions::Target::stemsAndMaster;
+        const auto shouldExportMaster = options.target == WavExportOptions::Target::masterMix
+                                     || options.target == WavExportOptions::Target::stemsAndMaster;
+        const auto currentStateIndex = tabs.getCurrentTabIndex();
+
+        if (shouldExportStems)
+        {
+            for (int stateIndex = 0; stateIndex < static_cast<int> (project.states.size()); ++stateIndex)
+            {
+                if (options.target == WavExportOptions::Target::currentStateStems && stateIndex != currentStateIndex)
+                    continue;
+
+                const auto& state = project.states[static_cast<size_t> (stateIndex)];
+                for (int trackIndex = 0; trackIndex < static_cast<int> (state.tracks.size()); ++trackIndex)
+                {
+                    const auto& track = state.tracks[static_cast<size_t> (trackIndex)];
+                    const auto file = folder.getChildFile (stemFileName (stateIndex, state, trackIndex, track));
+                    if (renderStemToFile (file, stateIndex, trackIndex, options))
+                        ++exported;
+                }
+            }
+        }
+
+        if (shouldExportMaster)
+        {
+            const auto file = folder.getChildFile (makeUnique ("00_Master Mix.wav"));
+            if (renderMasterMixToFile (file, options))
+                ++exported;
         }
 
         const auto bitDepthLabel = options.bitDepth == WavExportOptions::BitDepth::float32 ? "32-bit float"
@@ -4533,12 +4889,13 @@ private:
         const auto durationLabel = options.durationSeconds > 0.0
                                      ? " for " + juce::String (options.durationSeconds, 2) + " seconds"
                                      : juce::String();
+        const auto headroomLabel = options.headroomDb < -0.01f ? " with " + juce::String (options.headroomDb, 0) + " dB headroom" : juce::String();
         juce::AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon,
                                                 "Export complete",
                                                 "Exported " + juce::String (exported) + " "
                                                     + juce::String (options.sampleRate / 1000.0, 1)
                                                     + " kHz " + bitDepthLabel + " " + channelLabel + " stem files"
-                                                    + durationLabel + ".");
+                                                    + durationLabel + headroomLabel + ".");
     }
 
     int limitedTopPanelHeight (int proposedHeight) const

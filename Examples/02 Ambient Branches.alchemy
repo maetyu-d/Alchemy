@@ -1,0 +1,20 @@
+{
+  "format": "alchemy",
+  "version": 1,
+  "globalTempoBpm": 84,
+  "globalTimeSigNumerator": 5,
+  "globalTimeSigDenominator": 4,
+  "globalPhaseBeats": 0,
+  "scheduledStopBeat": -1,
+  "loopPlayback": true,
+  "chuckScoreScript": "score.clear();\ntempo(84);\nmeter(5, 4);\nstate.add(\"Glass\", 20, 8);\ntrack.add(1, \"slow fifths\", \"chuck\");\nstate.add(\"Low Cloud\", 15, 10);\ntrack.add(2, \"low bloom\", \"chuck\");\nstate.add(\"Bright Return\", 25, 8);\ntrack.add(3, \"bright pins\", \"csound\");\nstate.connect(1, 2, 45);\nstate.connect(1, 3, 55);\nstate.connect(2, 3, 1);\nplay();",
+  "tempoMap": [{"beat": 0, "bpm": 84}, {"beat": 40, "bpm": 96}],
+  "timeSignatureMap": [{"beat": 0, "numerator": 5, "denominator": 4}],
+  "phaseRotationMap": [],
+  "arrangementOrder": [0, 2, 1, 2],
+  "states": [
+    {"name": "Glass", "durationBeats": 20, "tailBeats": 8, "canvasX": 80, "canvasY": 130, "transitions": [{"targetStateIndex": 1, "weight": 45}, {"targetStateIndex": 2, "weight": 55}], "tracks": [{"name": "slow fifths", "language": "chuck", "sync": true, "tempo": 84, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0, "gain": 0.25, "muted": false, "soloed": false, "code": "SinOsc a => Gain g => dac;\nwhile (true) { 220 => a.freq; 0.18 => g.gain; 2::second => now; 330 => a.freq; 2::second => now; }", "gainEvents": []}]},
+    {"name": "Low Cloud", "durationBeats": 15, "tailBeats": 10, "canvasX": 330, "canvasY": 220, "transitions": [{"targetStateIndex": 2, "weight": 1}], "tracks": [{"name": "low bloom", "language": "chuck", "sync": true, "tempo": 84, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0, "gain": 0.32, "muted": false, "soloed": false, "code": "SinOsc s => Gain g => dac;\nwhile (true) { 110 => s.freq; 0.22 => g.gain; 3::second => now; }", "gainEvents": []}]},
+    {"name": "Bright Return", "durationBeats": 25, "tailBeats": 8, "canvasX": 580, "canvasY": 130, "transitions": [], "tracks": [{"name": "bright pins", "language": "csound", "sync": true, "tempo": 96, "timeSigNumerator": 5, "timeSigDenominator": 4, "phase": 0, "gain": 0.24, "muted": false, "soloed": false, "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.5, kfreq * 3, giSine\n outs a1, a1\nendin", "gainEvents": []}]}
+  ]
+}

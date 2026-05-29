@@ -6,6 +6,7 @@ build-csound/
 build-supercollider-host/
 cmake-build-*/
 out/
+dist/
 
 # CMake/user-local files
 CMakeUserPresets.json

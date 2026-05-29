@@ -547,32 +547,46 @@ bool EmbeddedPerformanceEngine::setTrackGain (int stateIndex, int trackIndex, fl
         return false;
     }
 
-    if (stateIndex < 0 || stateIndex >= static_cast<int> (requestedStates.size()))
+    if (stateIndex < 0 || trackIndex < 0)
     {
-        lastError = "Performance state index is out of range";
-        return false;
-    }
-
-    auto& requestedState = requestedStates[static_cast<size_t> (stateIndex)];
-    if (trackIndex < 0 || trackIndex >= static_cast<int> (requestedState.tracks.size()))
-    {
-        lastError = "Performance track index is out of range";
+        lastError = "Performance track gain index is out of range";
         return false;
     }
 
     const auto limitedGain = juce::jlimit (0.0f, maximumTrackGain, gain);
-        requestedState.tracks[static_cast<size_t> (trackIndex)].gain = limitedGain;
-        requestedState.tracks[static_cast<size_t> (trackIndex)].gainEvents.clear();
+    auto changed = false;
 
-        if (stateIndex < static_cast<int> (stateRuntimes.size()))
+    for (auto& requestedState : requestedStates)
+    {
+        for (auto& track : requestedState.tracks)
         {
-            auto& state = stateRuntimes[static_cast<size_t> (stateIndex)];
-            if (trackIndex < static_cast<int> (state.tracks.size()))
-            {
-                state.tracks[static_cast<size_t> (trackIndex)].definition.gain = limitedGain;
-                state.tracks[static_cast<size_t> (trackIndex)].definition.gainEvents.clear();
-            }
+            if (track.meterStateIndex != stateIndex || track.meterTrackIndex != trackIndex)
+                continue;
+
+            track.gain = limitedGain;
+            track.gainEvents.clear();
+            changed = true;
         }
+    }
+
+    for (auto& state : stateRuntimes)
+    {
+        for (auto& track : state.tracks)
+        {
+            if (track.definition.meterStateIndex != stateIndex || track.definition.meterTrackIndex != trackIndex)
+                continue;
+
+            track.definition.gain = limitedGain;
+            track.definition.gainEvents.clear();
+            changed = true;
+        }
+    }
+
+    if (! changed)
+    {
+        lastError = "Performance track gain target was not found";
+        return false;
+    }
 
     lastError.clear();
     return true;

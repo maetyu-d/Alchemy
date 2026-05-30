@@ -12,6 +12,7 @@
 #include <fstream>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -32,7 +33,125 @@
 #endif
 
 #if WELD_HAS_RTCMIX || WELD_HAS_SUPERCOLLIDER || WELD_HAS_CSOUND || WELD_HAS_FAUST
+#if JUCE_WINDOWS
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#ifndef RTLD_NOW
+#define RTLD_NOW 0
+#endif
+#ifndef RTLD_LOCAL
+#define RTLD_LOCAL 0
+#endif
+namespace
+{
+thread_local std::string weldDynamicLibraryError;
+
+void weldSetDynamicLibraryError (const juce::String& message)
+{
+    weldDynamicLibraryError = message.toStdString();
+}
+
+void weldSetLastWindowsLibraryError (const juce::String& context)
+{
+    const auto errorCode = GetLastError();
+    if (errorCode == ERROR_SUCCESS)
+    {
+        weldSetDynamicLibraryError (context + ": unknown loader error");
+        return;
+    }
+
+    LPWSTR messageBuffer = nullptr;
+    const auto length = FormatMessageW (FORMAT_MESSAGE_ALLOCATE_BUFFER
+                                        | FORMAT_MESSAGE_FROM_SYSTEM
+                                        | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                        nullptr,
+                                        errorCode,
+                                        MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                        reinterpret_cast<LPWSTR> (&messageBuffer),
+                                        0,
+                                        nullptr);
+
+    juce::String message = context + " (" + juce::String (static_cast<int> (errorCode)) + ")";
+    if (length > 0 && messageBuffer != nullptr)
+        message << ": " << juce::String (messageBuffer).trim();
+
+    if (messageBuffer != nullptr)
+        LocalFree (messageBuffer);
+
+    weldSetDynamicLibraryError (message);
+}
+
+void* dlopen (const char* path, int)
+{
+    SetLastError (ERROR_SUCCESS);
+    const auto libraryPath = juce::String::fromUTF8 (path);
+    HMODULE handle = nullptr;
+    const auto file = juce::File (libraryPath);
+
+    if (juce::File::isAbsolutePath (libraryPath))
+    {
+        handle = LoadLibraryExW (libraryPath.toWideCharPointer(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (handle == nullptr)
+            handle = LoadLibraryW (libraryPath.toWideCharPointer());
+    }
+    else
+    {
+        handle = LoadLibraryW (libraryPath.toWideCharPointer());
+    }
+
+    if (handle == nullptr)
+    {
+        weldSetLastWindowsLibraryError ("LoadLibrary failed for " + libraryPath);
+        return nullptr;
+    }
+
+    weldDynamicLibraryError.clear();
+    return reinterpret_cast<void*> (handle);
+}
+
+int dlclose (void* handle)
+{
+    if (handle == nullptr)
+        return 0;
+
+    if (FreeLibrary (reinterpret_cast<HMODULE> (handle)) == 0)
+    {
+        weldSetLastWindowsLibraryError ("FreeLibrary failed");
+        return 1;
+    }
+
+    weldDynamicLibraryError.clear();
+    return 0;
+}
+
+void* dlsym (void* handle, const char* symbolName)
+{
+    SetLastError (ERROR_SUCCESS);
+    auto* symbol = reinterpret_cast<void*> (GetProcAddress (reinterpret_cast<HMODULE> (handle), symbolName));
+    if (symbol == nullptr)
+        weldSetLastWindowsLibraryError ("GetProcAddress failed for " + juce::String (symbolName));
+    else
+        weldDynamicLibraryError.clear();
+
+    return symbol;
+}
+
+const char* dlerror()
+{
+    if (weldDynamicLibraryError.empty())
+        return nullptr;
+
+    return weldDynamicLibraryError.c_str();
+}
+}
+#else
 #include <dlfcn.h>
+#endif
 #endif
 
 #if WELD_HAS_RTCMIX
@@ -982,6 +1101,7 @@ process = tone + bright <: _, _;
         if (const auto* envPath = std::getenv ("WELD_FAUST_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "faust.dll");
         addBundledLibraryCandidate (candidates, "libfaust.dylib");
         addLibraryCandidate (candidates, WELD_FAUST_DEFAULT_LIBRARY);
 
@@ -1010,12 +1130,21 @@ process = tone + bright <: _, _;
                                           .getChildFile ("lib")
                                           .getChildFile ("libfaust.so")
                                           .getFullPathName());
+                addLibraryCandidate (candidates,
+                                     start.getChildFile ("third_party")
+                                          .getChildFile ("faust")
+                                          .getChildFile ("build")
+                                          .getChildFile ("lib")
+                                          .getChildFile ("faust.dll")
+                                          .getFullPathName());
                 addLibraryCandidate (candidates, start.getChildFile ("build-faust").getChildFile ("lib").getChildFile ("libfaust.dylib").getFullPathName());
                 addLibraryCandidate (candidates, start.getChildFile ("build-faust").getChildFile ("lib").getChildFile ("libfaust.so").getFullPathName());
+                addLibraryCandidate (candidates, start.getChildFile ("build-faust").getChildFile ("lib").getChildFile ("faust.dll").getFullPathName());
                 start = start.getParentDirectory();
             }
         }
 
+        addLibraryCandidate (candidates, "faust.dll");
         addLibraryCandidate (candidates, "libfaust.dylib");
         addLibraryCandidate (candidates, "libfaust.so");
         return candidates;
@@ -2146,10 +2275,14 @@ private:
             addLibraryCandidate (candidates, envPath);
 
         addBundledFrameworkCandidate (candidates, "CsoundLib64.framework", "CsoundLib64");
+        addBundledLibraryCandidate (candidates, "csound64.dll");
+        addBundledLibraryCandidate (candidates, "csound.dll");
         addBundledLibraryCandidate (candidates, "libcsound64.dylib");
         addBundledLibraryCandidate (candidates, "libcsound.dylib");
         addLibraryCandidate (candidates, WELD_CSOUND_DEFAULT_LIBRARY);
         addLibraryCandidate (candidates, "build-csound/CsoundLib64.framework/CsoundLib64");
+        addLibraryCandidate (candidates, "build-csound/csound64.dll");
+        addLibraryCandidate (candidates, "build-csound/csound.dll");
         addLibraryCandidate (candidates, "build-csound/libcsound64.dylib");
         addLibraryCandidate (candidates, "build-csound/libcsound64.so");
         addLibraryCandidate (candidates, "/opt/homebrew/lib/libcsound64.dylib");
@@ -2157,6 +2290,8 @@ private:
         addLibraryCandidate (candidates, "/usr/local/lib/libcsound64.dylib");
         addLibraryCandidate (candidates, "/usr/local/lib/libcsound.dylib");
         addLibraryCandidate (candidates, "/Library/Frameworks/CsoundLib64.framework/CsoundLib64");
+        addLibraryCandidate (candidates, "csound64.dll");
+        addLibraryCandidate (candidates, "csound.dll");
         addLibraryCandidate (candidates, "libcsound64.dylib");
         addLibraryCandidate (candidates, "libcsound.dylib");
         addLibraryCandidate (candidates, "libcsound64.so");
@@ -2875,8 +3010,10 @@ private:
                                       .getChildFile ("rtcmix")
                                       .getChildFile ("lib");
 
+        addLibraryCandidate (candidates, sourceDirectory.getChildFile ("rtcmix_embedded.dll").getFullPathName());
         addLibraryCandidate (candidates, sourceDirectory.getChildFile ("librtcmix_embedded.dylib").getFullPathName());
         addLibraryCandidate (candidates, sourceDirectory.getChildFile ("librtcmix_embedded.so").getFullPathName());
+        addLibraryCandidate (candidates, libDirectory.getChildFile ("rtcmix_embedded.dll").getFullPathName());
         addLibraryCandidate (candidates, libDirectory.getChildFile ("librtcmix_embedded.dylib").getFullPathName());
         addLibraryCandidate (candidates, libDirectory.getChildFile ("librtcmix_embedded.so").getFullPathName());
     }
@@ -2888,6 +3025,7 @@ private:
         if (const auto* envPath = std::getenv ("WELD_RTCMIX_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "rtcmix_embedded.dll");
         addBundledLibraryCandidate (candidates, "librtcmix_embedded.dylib");
         addLibraryCandidate (candidates, WELD_RTCMIX_DEFAULT_LIBRARY);
 
@@ -2910,6 +3048,7 @@ private:
 
         addFromParents (juce::File::getCurrentWorkingDirectory());
         addFromParents (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory());
+        addLibraryCandidate (candidates, "rtcmix_embedded.dll");
         addLibraryCandidate (candidates, "librtcmix_embedded.dylib");
         addLibraryCandidate (candidates, "librtcmix_embedded.so");
 
@@ -4175,6 +4314,7 @@ private:
         if (const auto* envPath = std::getenv ("WELD_SUPERCOLLIDER_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "scsynth.dll");
         addBundledLibraryCandidate (candidates, "libscsynth.dylib");
         addLibraryCandidate (candidates, WELD_SUPERCOLLIDER_DEFAULT_LIBRARY);
 
@@ -4182,6 +4322,11 @@ private:
         {
             for (;;)
             {
+                addLibraryCandidate (candidates, start.getChildFile ("build-supercollider-host")
+                                                    .getChildFile ("server")
+                                                    .getChildFile ("scsynth")
+                                                    .getChildFile ("scsynth.dll")
+                                                    .getFullPathName());
                 addLibraryCandidate (candidates, start.getChildFile ("build-supercollider-host")
                                                     .getChildFile ("server")
                                                     .getChildFile ("scsynth")
@@ -4203,6 +4348,7 @@ private:
 
         addFromParents (juce::File::getCurrentWorkingDirectory());
         addFromParents (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory());
+        addLibraryCandidate (candidates, "scsynth.dll");
         addLibraryCandidate (candidates, "libscsynth.dylib");
         addLibraryCandidate (candidates, "libscsynth.so");
         return candidates;
@@ -4215,6 +4361,7 @@ private:
         if (const auto* envPath = std::getenv ("WELD_SUPERCOLLIDER_LANG_LIBRARY"))
             addLibraryCandidate (candidates, envPath);
 
+        addBundledLibraryCandidate (candidates, "weldsclang.dll");
         addBundledLibraryCandidate (candidates, "libweldsclang.dylib");
         addLibraryCandidate (candidates, WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY);
 
@@ -4222,6 +4369,10 @@ private:
         {
             for (;;)
             {
+                addLibraryCandidate (candidates, start.getChildFile ("build-supercollider-host")
+                                                    .getChildFile ("lang")
+                                                    .getChildFile ("weldsclang.dll")
+                                                    .getFullPathName());
                 addLibraryCandidate (candidates, start.getChildFile ("build-supercollider-host")
                                                     .getChildFile ("lang")
                                                     .getChildFile ("libweldsclang.dylib")
@@ -4241,6 +4392,7 @@ private:
 
         addFromParents (juce::File::getCurrentWorkingDirectory());
         addFromParents (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory());
+        addLibraryCandidate (candidates, "weldsclang.dll");
         addLibraryCandidate (candidates, "libweldsclang.dylib");
         addLibraryCandidate (candidates, "libweldsclang.so");
         return candidates;

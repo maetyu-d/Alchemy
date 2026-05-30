@@ -4454,6 +4454,11 @@ public:
 
     void menuItemSelected (int menuItemID, int) override
     {
+        performMenuItem (menuItemID);
+    }
+
+    void performMenuItem (int menuItemID)
+    {
         switch (menuItemID)
         {
             case menuSave: saveProject(); break;
@@ -4542,6 +4547,8 @@ public:
     }
 
 private:
+    friend class MainWindow;
+
     using ScoreCommandId = ChucKScoreScript::CommandId;
 
     enum class BottomView
@@ -4751,6 +4758,7 @@ private:
         if (contentsDirectory != juce::File())
             directories.add (contentsDirectory.getChildFile ("Resources").getChildFile ("Examples"));
 
+        directories.add (executable.getParentDirectory().getChildFile ("Examples"));
         directories.add (juce::File::getCurrentWorkingDirectory().getChildFile ("Examples"));
         directories.add (juce::File::getSpecialLocation (juce::File::currentApplicationFile).getChildFile ("Contents").getChildFile ("Resources").getChildFile ("Examples"));
         return directories;
@@ -6678,9 +6686,15 @@ public:
     explicit MainWindow (juce::String name)
         : DocumentWindow (std::move (name),
                           juce::Colour (0xff09111c),
-                          juce::DocumentWindow::closeButton)
+                          juce::DocumentWindow::minimiseButton
+                            | juce::DocumentWindow::maximiseButton
+                            | juce::DocumentWindow::closeButton)
     {
+#if JUCE_WINDOWS
+        setUsingNativeTitleBar (true);
+#else
         setUsingNativeTitleBar (false);
+#endif
         setResizable (true, false);
         auto* main = new MainComponent();
         main->onDocumentStateChange = [this] (bool dirty, const juce::File& file)
@@ -6689,9 +6703,17 @@ public:
             setName ("Alchemy - " + fileName + (dirty ? " *" : ""));
         };
         setContentOwned (main, true);
+#if JUCE_WINDOWS
+        const auto display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
+        const auto workArea = display != nullptr ? display->userArea : juce::Rectangle<int> (0, 0, 1280, 800);
+        setBounds (workArea.reduced (40).withSizeKeepingCentre (juce::jmin (1400, workArea.getWidth() - 80),
+                                                                 juce::jmin (900, workArea.getHeight() - 80)));
+        setVisible (true);
+#else
         centreWithSize (1280, 800);
         setFullScreen (true);
         setVisible (true);
+#endif
     }
 
     void closeButtonPressed() override

@@ -6,18 +6,55 @@ enable_testing()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(JUCE_PATH "/Users/user/Documents/Fabric/JUCE" CACHE PATH "Path to a JUCE checkout")
+set(ALCHEMY_DEFAULT_JUCE_PATH "")
+if (DEFINED ENV{JUCE_PATH})
+    file(TO_CMAKE_PATH "$ENV{JUCE_PATH}" ALCHEMY_DEFAULT_JUCE_PATH)
+elseif (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/JUCE/CMakeLists.txt")
+    set(ALCHEMY_DEFAULT_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/JUCE")
+elseif (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/juce/CMakeLists.txt")
+    set(ALCHEMY_DEFAULT_JUCE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/juce")
+elseif (DEFINED ENV{USERPROFILE})
+    file(TO_CMAKE_PATH "$ENV{USERPROFILE}" ALCHEMY_USERPROFILE)
+    file(GLOB ALCHEMY_DESKTOP_JUCE_CANDIDATES
+         "${ALCHEMY_USERPROFILE}/Desktop/juce-*/JUCE"
+         "${ALCHEMY_USERPROFILE}/Desktop/JUCE")
+    if (ALCHEMY_DESKTOP_JUCE_CANDIDATES)
+        list(GET ALCHEMY_DESKTOP_JUCE_CANDIDATES 0 ALCHEMY_DEFAULT_JUCE_PATH)
+    endif()
+endif()
+
+set(JUCE_PATH "${ALCHEMY_DEFAULT_JUCE_PATH}" CACHE PATH "Path to a JUCE checkout")
+if (NOT JUCE_PATH STREQUAL "")
+    file(TO_CMAKE_PATH "${JUCE_PATH}" JUCE_PATH)
+    set(JUCE_PATH "${JUCE_PATH}" CACHE PATH "Path to a JUCE checkout" FORCE)
+endif()
+if (JUCE_PATH STREQUAL "" OR NOT EXISTS "${JUCE_PATH}/CMakeLists.txt")
+    message(FATAL_ERROR "Set JUCE_PATH to a JUCE checkout, or set the JUCE_PATH environment variable before configuring.")
+endif()
+
 add_subdirectory("${JUCE_PATH}" JUCE)
 
 set(CHUCK_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/chuck/src/core")
 set(WELD_RTCMIX_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/rtcmix" CACHE PATH "Path to an RTcmix checkout with an embedded build")
-set(WELD_RTCMIX_LIBRARY "" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib or librtcmix_embedded.so")
-set(WELD_CSOUND_LIBRARY "" CACHE FILEPATH "Optional path to libcsound64.dylib, libcsound.dylib, or libcsound.so")
+set(WELD_RTCMIX_LIBRARY "" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib, librtcmix_embedded.so, or rtcmix_embedded.dll")
+set(WELD_CSOUND_LIBRARY "" CACHE FILEPATH "Optional path to libcsound64.dylib, libcsound.dylib, libcsound.so, csound64.dll, or csound.dll")
 set(WELD_FAUST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/faust" CACHE PATH "Path to a Faust checkout with a libfaust build")
-set(WELD_FAUST_LIBRARY "" CACHE FILEPATH "Optional path to libfaust.dylib or libfaust.so")
+set(WELD_FAUST_LIBRARY "" CACHE FILEPATH "Optional path to libfaust.dylib, libfaust.so, or faust.dll")
 set(WELD_SUPERCOLLIDER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/supercollider" CACHE PATH "Path to a SuperCollider checkout with the Alchemy host audio backend")
-set(WELD_SUPERCOLLIDER_LIBRARY "" CACHE FILEPATH "Optional path to a host-audio libscsynth.dylib or libscsynth.so")
-set(WELD_SUPERCOLLIDER_LANG_LIBRARY "" CACHE FILEPATH "Optional path to libweldsclang.dylib or libweldsclang.so")
+set(WELD_SUPERCOLLIDER_LIBRARY "" CACHE FILEPATH "Optional path to a host-audio libscsynth.dylib, libscsynth.so, or scsynth.dll")
+set(WELD_SUPERCOLLIDER_LANG_LIBRARY "" CACHE FILEPATH "Optional path to libweldsclang.dylib, libweldsclang.so, or weldsclang.dll")
+
+foreach(ALCHEMY_LIBRARY_CACHE_VAR
+        WELD_RTCMIX_LIBRARY
+        WELD_CSOUND_LIBRARY
+        WELD_FAUST_LIBRARY
+        WELD_SUPERCOLLIDER_LIBRARY
+        WELD_SUPERCOLLIDER_LANG_LIBRARY)
+    if (NOT "${${ALCHEMY_LIBRARY_CACHE_VAR}}" STREQUAL "")
+        file(TO_CMAKE_PATH "${${ALCHEMY_LIBRARY_CACHE_VAR}}" ${ALCHEMY_LIBRARY_CACHE_VAR})
+        set(${ALCHEMY_LIBRARY_CACHE_VAR} "${${ALCHEMY_LIBRARY_CACHE_VAR}}" CACHE FILEPATH "" FORCE)
+    endif()
+endforeach()
 
 set(WELD_HAS_RTCMIX 0)
 set(WELD_RTCMIX_INCLUDE_DIR "${WELD_RTCMIX_ROOT}/src/rtcmix")
@@ -34,13 +71,15 @@ set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "")
 
 if (APPLE AND EXISTS "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.dylib")
     set(WELD_RTCMIX_DEFAULT_LIBRARY "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.dylib")
+elseif (WIN32 AND EXISTS "${WELD_RTCMIX_ROOT}/src/rtcmix/rtcmix_embedded.dll")
+    set(WELD_RTCMIX_DEFAULT_LIBRARY "${WELD_RTCMIX_ROOT}/src/rtcmix/rtcmix_embedded.dll")
 elseif (UNIX AND EXISTS "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.so")
     set(WELD_RTCMIX_DEFAULT_LIBRARY "${WELD_RTCMIX_ROOT}/src/rtcmix/librtcmix_embedded.so")
 endif()
 
-if ((WELD_RTCMIX_LIBRARY STREQUAL "" OR WELD_RTCMIX_LIBRARY MATCHES "\\.a$")
+if ((WELD_RTCMIX_LIBRARY STREQUAL "" OR WELD_RTCMIX_LIBRARY MATCHES "\\.(a|lib)$")
     AND NOT WELD_RTCMIX_DEFAULT_LIBRARY STREQUAL "")
-    set(WELD_RTCMIX_LIBRARY "${WELD_RTCMIX_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib or librtcmix_embedded.so" FORCE)
+    set(WELD_RTCMIX_LIBRARY "${WELD_RTCMIX_DEFAULT_LIBRARY}" CACHE FILEPATH "Optional path to librtcmix_embedded.dylib, librtcmix_embedded.so, or rtcmix_embedded.dll" FORCE)
 endif()
 
 if (EXISTS "${WELD_RTCMIX_INCLUDE_DIR}/RTcmix_API.h")
@@ -56,6 +95,10 @@ endif()
 
 if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/CsoundLib64.framework/CsoundLib64")
     set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/CsoundLib64.framework/CsoundLib64")
+elseif (WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/csound64.dll")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/csound64.dll")
+elseif (WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/csound.dll")
+    set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/csound.dll")
 elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.so")
     set(WELD_CSOUND_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.so")
 elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-csound/libcsound64.dylib")
@@ -84,10 +127,14 @@ endif()
 
 if (APPLE AND EXISTS "${WELD_FAUST_ROOT}/build/lib/libfaust.dylib")
     set(WELD_FAUST_DEFAULT_LIBRARY "${WELD_FAUST_ROOT}/build/lib/libfaust.dylib")
+elseif (WIN32 AND EXISTS "${WELD_FAUST_ROOT}/build/lib/faust.dll")
+    set(WELD_FAUST_DEFAULT_LIBRARY "${WELD_FAUST_ROOT}/build/lib/faust.dll")
 elseif (UNIX AND EXISTS "${WELD_FAUST_ROOT}/build/lib/libfaust.so")
     set(WELD_FAUST_DEFAULT_LIBRARY "${WELD_FAUST_ROOT}/build/lib/libfaust.so")
 elseif (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.dylib")
     set(WELD_FAUST_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.dylib")
+elseif (WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/faust.dll")
+    set(WELD_FAUST_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/faust.dll")
 elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.so")
     set(WELD_FAUST_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-faust/lib/libfaust.so")
 endif()
@@ -109,12 +156,16 @@ endif()
 
 if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.dylib")
     set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.dylib")
+elseif (WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/scsynth.dll")
+    set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/scsynth.dll")
 elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.so")
     set(WELD_SUPERCOLLIDER_DEFAULT_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/server/scsynth/libscsynth.so")
 endif()
 
 if (APPLE AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.dylib")
     set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.dylib")
+elseif (WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/weldsclang.dll")
+    set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/weldsclang.dll")
 elseif (UNIX AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.so")
     set(WELD_SUPERCOLLIDER_DEFAULT_LANG_LIBRARY "${CMAKE_CURRENT_SOURCE_DIR}/build-supercollider-host/lang/libweldsclang.so")
 endif()
@@ -209,7 +260,6 @@ target_include_directories(chuck_core
 
 target_compile_definitions(chuck_core
     PUBLIC
-        __MACOSX_CORE__
         __DISABLE_HID__
         __DISABLE_MIDI__
         __DISABLE_SERIAL__
@@ -220,17 +270,31 @@ target_compile_definitions(chuck_core
         __DISABLE_PROMPTER__
         __USE_CHUCK_YACC__)
 
-target_compile_options(chuck_core
-    PRIVATE
-        -Wno-deprecated-declarations
-        -Wno-format
-        -Wno-unused-variable
-        -Wno-nontrivial-memcall
-        -Wno-deprecated-copy-with-user-provided-copy
-        -Wno-zero-as-null-pointer-constant
-        -Wno-nested-anon-types
-        -Wno-sign-conversion
-        -Wno-extra-semi)
+if (APPLE)
+    target_compile_definitions(chuck_core PUBLIC __MACOSX_CORE__)
+endif()
+
+if (MSVC)
+    target_compile_definitions(chuck_core PRIVATE _CRT_SECURE_NO_WARNINGS _WINSOCK_DEPRECATED_NO_WARNINGS)
+    target_compile_options(chuck_core PRIVATE /wd4244 /wd4267 /wd4305 /wd4996)
+else()
+    target_compile_options(chuck_core
+        PRIVATE
+            -Wno-deprecated-declarations
+            -Wno-format
+            -Wno-unused-variable
+            -Wno-nontrivial-memcall
+            -Wno-deprecated-copy-with-user-provided-copy
+            -Wno-zero-as-null-pointer-constant
+            -Wno-nested-anon-types
+            -Wno-sign-conversion
+            -Wno-extra-semi)
+endif()
+
+if (WIN32)
+    target_compile_definitions(chuck_core PRIVATE HAVE_WIN32_THREADS)
+    target_link_libraries(chuck_core PRIVATE ws2_32 winmm)
+endif()
 
 add_library(weld_chuck_engine STATIC)
 add_library(Alchemy::Engine ALIAS weld_chuck_engine)
@@ -286,6 +350,8 @@ target_link_libraries(weld_chuck_engine
 
 target_compile_definitions(weld_chuck_engine
     PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
+        $<$<CXX_COMPILER_ID:MSVC>:_WINSOCK_DEPRECATED_NO_WARNINGS>
         WELD_HAS_RTCMIX=${WELD_HAS_RTCMIX}
         WELD_HAS_CSOUND=${WELD_HAS_CSOUND}
         WELD_HAS_FAUST=${WELD_HAS_FAUST}
@@ -343,16 +409,22 @@ target_link_libraries(AlchemyGui
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+if (APPLE)
+    set(ALCHEMY_GUI_RESOURCE_DIR "$<TARGET_BUNDLE_DIR:AlchemyGui>/Contents/Resources")
+else()
+    set(ALCHEMY_GUI_RESOURCE_DIR "$<TARGET_FILE_DIR:AlchemyGui>")
+endif()
+
 add_custom_command(TARGET AlchemyGui POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_CURRENT_SOURCE_DIR}/Examples"
-            "$<TARGET_BUNDLE_DIR:AlchemyGui>/Contents/Resources/Examples")
+            "${ALCHEMY_GUI_RESOURCE_DIR}/Examples")
 
 if (EXISTS "${WELD_FAUST_ROOT}/libraries/stdfaust.lib")
     add_custom_command(TARGET AlchemyGui POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${WELD_FAUST_ROOT}/libraries"
-                "$<TARGET_BUNDLE_DIR:AlchemyGui>/Contents/Resources/Faust/libraries")
+                "${ALCHEMY_GUI_RESOURCE_DIR}/Faust/libraries")
 endif()
 
 add_executable(AlchemyEngineBoundaryTest

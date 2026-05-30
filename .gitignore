@@ -2,6 +2,8 @@
 
 # Local build products
 build/
+build-logs/
+build-win*/
 build-csound/
 build-supercollider-host/
 cmake-build-*/

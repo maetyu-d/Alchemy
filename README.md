@@ -80,6 +80,22 @@ Tempo events are expressed at global beat positions and are integrated into samp
 
 ## Build
 
+Set `JUCE_PATH` to a local JUCE checkout, or pass `-DJUCE_PATH=...` when configuring. The CMake file also checks `third_party/JUCE` and common Windows desktop JUCE archive paths. On Windows, use Visual Studio or Ninja with the MSVC developer environment:
+
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DJUCE_PATH=C:\path\to\JUCE
+cmake --build build --config Release
+```
+
+The Windows executables are generated under:
+
+```powershell
+build\Alchemy_artefacts\Release\Alchemy.exe
+build\AlchemyGui_artefacts\Release\Alchemy.exe
+```
+
+The GUI examples are copied next to the `.exe` in an `Examples` folder. Optional Csound, Faust, SuperCollider, and RTcmix runtimes are loaded dynamically; Windows builds look for `csound64.dll`/`csound.dll`, `faust.dll`, `scsynth.dll`, `weldsclang.dll`, and `rtcmix_embedded.dll` in the same candidate roots as the macOS/Linux libraries, or from the matching `WELD_*_LIBRARY` environment variables/CMake cache entries.
+
 ```sh
 cmake -S . -B build -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release

@@ -2,6 +2,8 @@
 
 This is a lean JUCE audio host with ChucK embedded in-process.
 
+<img width="1920" height="1020" alt="image" src="https://github.com/user-attachments/assets/12a97972-adb4-4802-a0dc-c05371c4a80e" />
+
 Runtime shape:
 
 ```text

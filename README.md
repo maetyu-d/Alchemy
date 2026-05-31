@@ -38,7 +38,9 @@ engine.loadProgramAsync (programText, parameterBindings);
 engine.process (input, output);
 ```
 
-The language slots are `chuck`, `faust`, `csound`, `supercollider`, and `rtcmix`. ChucK is always built in. Faust is built when a Faust checkout with `faust/dsp/interpreter-dsp-c.h` is available, and it dynamically loads `libfaust` at prepare time. Csound is built as a dynamic in-process backend and loads `libcsound` at prepare time. RTcmix is built when an RTcmix checkout with `RTcmix_API.h` is available, and it dynamically loads an embedded RTcmix runtime library at prepare time. SuperCollider is built when a SuperCollider checkout with the Alchemy host-audio `libscsynth` patch is available, and it dynamically loads that in-process runtime at prepare time. None of these backends spawn external interpreters or open their own audio devices; unavailable builds clear output buffers if asked to render. Use `EmbeddedLanguageEngine::isLanguageBuiltIn()` and `getLanguageBuildStatus()` to check the compiled-in set at runtime.
+The language slots are `chuck`, `faust`, `csound`, `supercollider`, `supercollider-score`, and `rtcmix`. ChucK is always built in. Faust is built when a Faust checkout with `faust/dsp/interpreter-dsp-c.h` is available, and it dynamically loads `libfaust` at prepare time. Csound is built as a dynamic in-process backend and loads `libcsound` at prepare time. RTcmix is built when an RTcmix checkout with `RTcmix_API.h` is available, and it dynamically loads an embedded RTcmix runtime library at prepare time. SuperCollider is built when a SuperCollider checkout with the Alchemy host-audio `libscsynth` and `libsclang` bridge patch is available, and it dynamically loads that in-process runtime at prepare time. None of these backends spawn external interpreters or open their own audio devices; unavailable builds clear output buffers if asked to render. Use `EmbeddedLanguageEngine::isLanguageBuiltIn()` and `getLanguageBuildStatus()` to check the compiled-in set at runtime.
+
+Alchemy exposes two SuperCollider modes. `supercollider` is **SuperCollider Function**, the original embedded signal-patch mode: a source body evaluates to a `Function` or `SynthDef`, receives Alchemy host controls every render quantum, and is the tightest choice for sample-following patches. `supercollider-score` is **SuperCollider Score**, a full SynthDef/Pattern path: source may return a `Pattern`, `Score`, `Event`, or a dictionary containing `synthDefs` plus `pattern`, `score`, or `event`. Alchemy compiles that source off the audio thread into beat-domain server packets, then dispatches them from the Alchemy render clock into the private in-process `libscsynth` world with sample offsets inside each 64-frame SC host quantum.
 
 `EmbeddedPerformanceEngine` sits above the language facade for pieces that move between language states. It keeps prepared language runtimes for every track inside every state, advances a sample-clocked playhead at a global tempo, and mixes overlapping state windows so an outgoing state can keep rendering its tail while the next state starts:
 
@@ -120,7 +122,7 @@ To check that embedded language backends can run representative online/manual-st
 build/Alchemy_artefacts/Release/Alchemy --language-example-test
 ```
 
-This renders a small compatibility corpus for ChucK, Faust, Csound, SuperCollider, and RTcmix through the actual in-process backends and checks for finite, non-silent output. The corpus is adapted from the official/manual examples and references for ChucK UGens, Faust `stdfaust.lib`, Csound opcodes, SuperCollider example functions, and RTcmix instruments/PFields:
+This renders a small compatibility corpus for ChucK, Faust, Csound, SuperCollider Function, SuperCollider Score, and RTcmix through the actual in-process backends and checks for finite, non-silent output. The corpus is adapted from the official/manual examples and references for ChucK UGens, Faust `stdfaust.lib`, Csound opcodes, SuperCollider example functions and patterns, and RTcmix instruments/PFields:
 
 - https://chuck.stanford.edu/doc/examples/
 - https://chuck.cs.princeton.edu/doc/program/ugen.html
@@ -132,7 +134,7 @@ This renders a small compatibility corpus for ChucK, Faust, Csound, SuperCollide
 - https://rtcmix.org/reference/instruments/FMINST.html
 - https://rtcmix.org/reference/instruments/AMINST.html
 
-Languages that are declared but not built into the current binary are reported as skipped. SuperCollider examples from `supercollider.github.io/examples` that use `{ ... }.play` should be pasted into Alchemy as the function body only, returning the audio signal; Alchemy owns the synth lifetime and output routing.
+Languages that are declared but not built into the current binary are reported as skipped. SuperCollider examples from `supercollider.github.io/examples` that use `{ ... }.play` should be pasted into SuperCollider Function as the function body only, returning the audio signal; Alchemy owns the synth lifetime and output routing. SuperCollider Score is for `SynthDef`/`Pbind`/`Ppar` style pieces. It accepts normal `SynthDef(...).add` definitions followed by a pattern such as `Ppar([...]).play(TempoClock(...))`; the bridge extracts the score material and Alchemy owns scheduling. `loopBeats`, `durationBeats`, and the compatibility alias `duration` are measured in beats when a dictionary-form score is used.
 
 To check the WAV export path headlessly:
 
@@ -260,7 +262,7 @@ cmake --build build-csound --target CsoundLib64
 
 On macOS, Apple's `/usr/bin/bison` may be too old for current Csound source. Build or install a newer GNU Bison and pass `-DBISON_EXECUTABLE=/path/to/bison` to the Csound configure command if parser generation fails.
 
-The Alchemy CMake configure step records a runtime hint for `build-csound/CsoundLib64.framework/CsoundLib64` on macOS or `build-csound/libcsound64.so`/`.dylib` on Unix-style builds. You can override that path with `-DWELD_CSOUND_LIBRARY=/path/to/libcsound64.dylib` or by setting the `WELD_CSOUND_LIBRARY` environment variable before running the host.
+The Alchemy CMake configure step records a runtime hint for `build-csound/CsoundLib64.framework/CsoundLib64` on macOS or `build-csound/libcsound64.so`/`.dylib` on Unix-style builds. You can override that path with `-DWELD_CSOUND_LIBRARY=/path/to/libcsound64.dylib` or by setting the `WELD_CSOUND_LIBRARY` environment variable before running the host. Alchemy also sets Csound's opcode search variables to a bundled/local resource directory, or to a private empty directory for plugin-free builds, so Csound does not warn about a missing default `Opcodes64` folder. Set `WELD_CSOUND_OPCODE_DIR` before launch if you want Csound to scan a specific opcode plugin directory.
 
 Csound source loading is in-process and host-pulled. Alchemy injects `sr`, `ksmps = 1`, `nchnls`, `nchnls_i`, and `0dbfs = 1` around the orchestra body, creates a private Csound instance off the audio callback, starts it with host-implemented audio I/O, schedules `i 1 0 -1`, then swaps the prepared instance into the render path. The audio callback writes directly to Csound's `spin` buffer, calls `csoundPerformKsmps()` once per host sample, reads directly from `spout`, and maps host parameters to Csound control channels such as:
 
@@ -294,7 +296,9 @@ cmake --build build-supercollider-host --target OscUGens LFUGens IOUGens MulAddU
 
 The Alchemy CMake configure step looks for `third_party/supercollider/include/server/SC_WorldOptions.h` and records runtime hints for `build-supercollider-host/server/scsynth/libscsynth.dylib` and `build-supercollider-host/lang/libweldsclang.dylib`. You can override those paths with `-DWELD_SUPERCOLLIDER_LIBRARY=/path/to/libscsynth.dylib` and `-DWELD_SUPERCOLLIDER_LANG_LIBRARY=/path/to/libweldsclang.dylib`, or with the matching environment variables before running the host.
 
-SuperCollider source loading is in-process: Alchemy asks the embedded `libsclang` bridge to compile source text into SynthDef bytes off the audio callback, sends `/d_recv` and `/s_new` directly into the private `libscsynth` world, then renders by host-pulling audio. A source body may evaluate to a `SynthDef` named `weldMain`, or more conveniently to a `Function`; function arguments receive the performance control bus in binding order, starting with `hostFreq`, `hostGain`, `hostBlend`, `hostStateGate`, `hostStateGain`, and continuing through the track tempo, meter, phase, and gain controls:
+SuperCollider source loading is in-process. Alchemy has two SuperCollider language choices in the track and processor editors.
+
+**SuperCollider Function** is the original tight signal-patch mode. Alchemy asks the embedded `libsclang` bridge to compile source text into SynthDef bytes off the audio callback, sends `/d_recv` and `/s_new` directly into the private `libscsynth` world, then renders by host-pulling audio. A source body may evaluate to a `SynthDef` named `weldMain`, or more conveniently to a `Function`; function arguments receive the performance control bus in binding order, starting with `hostFreq`, `hostGain`, `hostBlend`, `hostStateGate`, `hostStateGain`, and continuing through the track tempo, meter, phase, and gain controls:
 
 ```supercollider
 { |freq = 440, gain = 0.1, blend = 0.5, stateGate = 1, stateGain = 1, tempoBpm = 120,
@@ -302,6 +306,23 @@ SuperCollider source loading is in-process: Alchemy asks the embedded `libsclang
    barBeat = 0, barPhase = 0, phaseRotation = 0, trackGain = 1|
     SinOsc.ar(freq) * gain * stateGain * trackGain
 }
+```
+
+**SuperCollider Score** is for full SynthDef and Pattern material. The source may evaluate to a `Pattern`, `Score`, `Event`, a `Function` returning one of those values, or a dictionary with optional `synthDefs`/`defs`, one of `pattern`/`score`/`event`, and optional `loopBeats`, `durationBeats`, `duration`, and `tempo` values. The embedded language bridge compiles that score off the audio thread into beat-domain OSC server packets. During playback Alchemy converts those beats through the active track tempo/state clock, dispatches note packets with sample offsets inside each 64-frame SC host quantum, and then host-pulls the resulting audio. Loop repeats get fresh node ids so tails can cross the loop boundary without colliding. This keeps SC pattern timing aligned to the same state clock as ChucK, Csound, Faust, and RTcmix tracks without launching `sclang` or `scsynth`.
+
+```supercollider
+SynthDef(\bassPulse, { |out = 0, freq = 60, amp = 0.1, gate = 1|
+    var env = Env.asr(0.002, 1, 0.05).ar(doneAction: 2, gate: gate);
+    Out.ar(out, (Saw.ar(freq) * env * amp).dup);
+}).add;
+
+Pbind(
+    \instrument, \bassPulse,
+    \dur, Pseq([1, 0.5, 0.5], inf),
+    \freq, Pseq([60, 60, 90, 75], inf),
+    \amp, -18.dbamp
+).play(TempoClock(2));
+)
 ```
 
 ## Notes
@@ -312,7 +333,7 @@ The multi-language facade keeps the same tightness boundary for future language 
 
 - Faust is embedded through libfaust's interpreter factory API. Alchemy compiles a candidate DSP instance off the audio callback, binds host controls to Faust UI zones such as `hslider("hostFreq", ...)`, and calls `compute()` from the host-owned render path after commit.
 - Csound is embedded through `libcsound` with host-implemented audio I/O. Alchemy compiles an orchestra body into a private candidate instance, forces `ksmps = 1`, maps controls through Csound software channels, drives `spin`/`spout` directly, and performs one Csound k-cycle per host sample so parameter and audio exchange are sample-tight.
-- SuperCollider is embedded as `libscsynth` plus an in-process `libsclang` bridge, not by launching `scsynth`/`sclang` or using OSC to an external server. Alchemy's host-pulled audio driver/world adapter lets JUCE own the callback, feeds SC input/output buses directly, compiles SC source to SynthDef bytes off the audio callback, and commits server packets directly into the private world.
+- SuperCollider is embedded as `libscsynth` plus an in-process `libsclang` bridge, not by launching `scsynth`/`sclang` or using OSC to an external server. Alchemy's host-pulled audio driver/world adapter lets JUCE own the callback and feeds SC input/output buses directly. Function mode compiles SC source to SynthDef bytes off the audio callback and commits `/d_recv`/`/s_new` directly into the private world; Score mode compiles SynthDef/Pattern material into timed packets and dispatches them from the Alchemy render clock.
 - RTcmix is embedded through its `EMBEDDEDAUDIO` C API. Alchemy loads the embedded runtime in-process, configures float interleaved buffers, maps host parameters to `makeconnection("inlet", ...)` pfields, and calls `RTcmix_runAudio()` from the host render path. RTcmix-owned audio threads or command-line `CMIX` execution do not meet this repository's tightness rule.
 
 RTcmix's public embedded API is a process-global runtime, so Alchemy allows only one active RTcmix engine at a time. Score loading is off the audio callback and fails silent, but it is not as transactional as the ChucK VM swap because stock RTcmix does not expose separate candidate worlds for parse/commit/rollback.

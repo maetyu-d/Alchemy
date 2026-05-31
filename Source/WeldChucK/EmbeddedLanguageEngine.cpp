@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -1405,6 +1406,7 @@ private:
         using CleanupFn = int (*) (Csound*);
         using StopFn = void (*) (Csound*);
         using ResetFn = void (*) (Csound*);
+        using SetGlobalEnvFn = int (*) (const char*, const char*);
         using GetKsmpsFn = uint32_t (*) (Csound*);
         using GetChannelsFn = uint32_t (*) (Csound*, int);
         using GetNchnlsLegacyFn = uint32_t (*) (Csound*);
@@ -1432,6 +1434,7 @@ private:
         CleanupFn cleanup = nullptr;
         StopFn stop = nullptr;
         ResetFn reset = nullptr;
+        SetGlobalEnvFn setGlobalEnv = nullptr;
         GetKsmpsFn getKsmps = nullptr;
         GetChannelsFn getChannels = nullptr;
         GetNchnlsLegacyFn getNchnls = nullptr;
@@ -1487,6 +1490,7 @@ private:
                 loadOptionalSymbol (csoundApi.cleanup, "csoundCleanup");
                 loadOptionalSymbol (csoundApi.stop, "csoundStop");
                 loadOptionalSymbol (csoundApi.reset, "csoundReset");
+                loadOptionalSymbol (csoundApi.setGlobalEnv, "csoundSetGlobalEnv");
                 loadOptionalSymbol (csoundApi.getChannels, "csoundGetChannels");
                 loadOptionalSymbol (csoundApi.getNchnls, "csoundGetNchnls");
                 loadOptionalSymbol (csoundApi.getNchnlsInput, "csoundGetNchnlsInput");
@@ -1501,6 +1505,8 @@ private:
                 csoundApi.myfltSize = csoundApi.getSizeOfMYFLT != nullptr
                                         ? csoundApi.getSizeOfMYFLT()
                                         : static_cast<int> (sizeof (double));
+                csoundOpcodeDirectoryPath = findCsoundOpcodeDirectory (candidate).getFullPathName();
+                configureGlobalOpcodeDirectoryOnce (csoundOpcodeDirectoryPath);
 
                 if (csoundApi.getChannels == nullptr
                     && (csoundApi.getNchnls == nullptr || csoundApi.getNchnlsInput == nullptr))
@@ -1633,6 +1639,39 @@ private:
     bool usesModernCsoundSignatures() const noexcept
     {
         return csoundApi.version >= 7000;
+    }
+
+    void configureGlobalOpcodeDirectoryOnce (const juce::String& opcodeDirectoryPath)
+    {
+        std::lock_guard<std::mutex> lock (csoundGlobalEnvironmentMutex());
+        if (csoundGlobalEnvironmentConfigured())
+            return;
+
+        if (opcodeDirectoryPath.isNotEmpty())
+        {
+            setCsoundEnvironmentIfUnset ("OPCODE7DIR64", opcodeDirectoryPath);
+            setCsoundEnvironmentIfUnset ("OPCODE7DIR", opcodeDirectoryPath);
+            setCsoundEnvironmentIfUnset ("OPCODE6DIR64", opcodeDirectoryPath);
+            setCsoundEnvironmentIfUnset ("OPCODE6DIR", opcodeDirectoryPath);
+        }
+
+        csoundGlobalEnvironmentConfigured() = true;
+    }
+
+    void setCsoundEnvironmentIfUnset (const char* name, const juce::String& value)
+    {
+        if (name == nullptr || value.isEmpty())
+            return;
+
+        if (const auto* existing = std::getenv (name); existing != nullptr && existing[0] != '\0')
+            return;
+
+       #if ! defined (_WIN32)
+        static_cast<void> (setenv (name, value.toRawUTF8(), 0));
+       #endif
+
+        if (csoundApi.setGlobalEnv != nullptr)
+            static_cast<void> (csoundApi.setGlobalEnv (name, value.toRawUTF8()));
     }
 
     bool loadProgramUnlocked (const juce::String& programBody,
@@ -2164,6 +2203,92 @@ private:
         return candidates;
     }
 
+    static juce::File findCsoundOpcodeDirectory (const juce::String& libraryPath)
+    {
+        std::vector<juce::File> candidates;
+        const auto addCandidate = [&candidates] (const juce::File& directory)
+        {
+            if (directory.isDirectory())
+                candidates.push_back (directory);
+        };
+
+        if (const auto* envPath = std::getenv ("WELD_CSOUND_OPCODE_DIR"))
+            addCandidate (juce::File (envPath));
+
+        const auto contents = getBundleContentsDirectory();
+        if (contents != juce::File())
+        {
+            const auto resources = contents.getChildFile ("Resources");
+            addCandidate (resources.getChildFile ("Csound").getChildFile ("Opcodes64"));
+            addCandidate (resources.getChildFile ("Csound").getChildFile ("Opcodes"));
+            addCandidate (resources.getChildFile ("Csound"));
+        }
+
+        auto libraryFile = juce::File (libraryPath);
+        for (int depth = 0; depth < 12 && libraryFile != juce::File(); ++depth)
+        {
+            if (libraryFile.getFileName().endsWith (".framework"))
+            {
+                addCandidate (libraryFile.getChildFile ("Resources").getChildFile ("Opcodes64"));
+                addCandidate (libraryFile.getChildFile ("Resources").getChildFile ("Opcodes"));
+                addCandidate (libraryFile.getChildFile ("Resources"));
+                addCandidate (libraryFile.getChildFile ("Versions").getChildFile ("Current").getChildFile ("Resources").getChildFile ("Opcodes64"));
+                addCandidate (libraryFile.getChildFile ("Versions").getChildFile ("Current").getChildFile ("Resources").getChildFile ("Opcodes"));
+                addCandidate (libraryFile.getChildFile ("Versions").getChildFile ("Current").getChildFile ("Resources"));
+            }
+
+            const auto parent = libraryFile.getParentDirectory();
+            if (parent == libraryFile)
+                break;
+
+            libraryFile = parent;
+        }
+
+        std::vector<juce::File> starts
+        {
+            juce::File::getCurrentWorkingDirectory(),
+            juce::File::getSpecialLocation (juce::File::currentExecutableFile).getParentDirectory()
+        };
+
+        for (auto start : starts)
+        {
+            for (int depth = 0; depth < 8 && start.exists(); ++depth)
+            {
+                addCandidate (start.getChildFile ("build-csound").getChildFile ("CsoundLib64.framework").getChildFile ("Resources").getChildFile ("Opcodes64"));
+                addCandidate (start.getChildFile ("build-csound").getChildFile ("CsoundLib64.framework").getChildFile ("Resources"));
+                addCandidate (start.getChildFile ("build-csound").getChildFile ("Opcodes64"));
+                addCandidate (start.getChildFile ("build-csound").getChildFile ("Opcodes"));
+
+                const auto parent = start.getParentDirectory();
+                if (parent == start)
+                    break;
+
+                start = parent;
+            }
+        }
+
+        if (! candidates.empty())
+            return candidates.front();
+
+        auto emptyDirectory = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                .getChildFile ("Alchemy")
+                                .getChildFile ("CsoundOpcodes");
+        emptyDirectory.createDirectory();
+        return emptyDirectory;
+    }
+
+    static std::mutex& csoundGlobalEnvironmentMutex()
+    {
+        static std::mutex mutex;
+        return mutex;
+    }
+
+    static bool& csoundGlobalEnvironmentConfigured()
+    {
+        static bool configured = false;
+        return configured;
+    }
+
     static juce::String getDefaultProgram()
     {
         return R"csound(
@@ -2206,6 +2331,7 @@ endin
     mutable juce::CriticalSection engineLock;
     juce::String lastError;
     juce::String currentProgram;
+    juce::String csoundOpcodeDirectoryPath;
     std::vector<EmbeddedLanguageEngine::ParameterBinding> currentBindings;
     std::array<std::atomic<float>, EmbeddedChucKEngine::maximumParameterCount> parameterValues;
     std::atomic<int> activeParameterCount { 0 };
@@ -3402,6 +3528,11 @@ class SuperColliderRuntime final : public EmbeddedLanguageEngine::Runtime
 public:
     static constexpr int hostRenderQuantum = 64;
 
+    explicit SuperColliderRuntime (bool scoreModeToUse = false)
+        : scoreMode (scoreModeToUse)
+    {
+    }
+
     ~SuperColliderRuntime() override
     {
         release();
@@ -3524,22 +3655,41 @@ public:
             }
             else
             {
-                std::vector<char> synthDefBytes;
-                if (! compileSourceToSynthDefBytes (trimmed, synthDefBytes, error))
+                if (scoreMode)
                 {
-                    lastError = error;
-                    programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
-                    return false;
-                }
+                    if (! compileSourceToScoreEvents (trimmed, scoreEvents, error))
+                    {
+                        lastError = error;
+                        programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+                        return false;
+                    }
 
-                auto sNew = buildSynthNewMessage();
-                auto dRecv = buildOscMessage ("/d_recv", { OscArgument::blob (synthDefBytes),
-                                                           OscArgument::blob (sNew) });
-                if (! scApi.worldSendPacket (world, static_cast<int> (dRecv.size()), dRecv.data(), nullptr))
+                    sendInitialScoreEventsUnlocked();
+                    primeScoreSetupUnlocked();
+                    scoreStandaloneBeat = 0.0;
+                    scoreLastHostStateBeat = std::numeric_limits<double>::quiet_NaN();
+                }
+                else
                 {
-                    lastError = "SuperCollider rejected the compiled SynthDef";
-                    programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
-                    return false;
+                    std::vector<char> synthDefBytes;
+                    if (! compileSourceToSynthDefBytes (trimmed, synthDefBytes, error))
+                    {
+                        lastError = error;
+                        programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+                        return false;
+                    }
+
+                    auto sNew = buildSynthNewMessage();
+                    auto dRecv = buildOscMessage ("/d_recv", { OscArgument::blob (synthDefBytes),
+                                                               OscArgument::blob (sNew) });
+                    if (! scApi.worldSendPacket (world, static_cast<int> (dRecv.size()), dRecv.data(), nullptr))
+                    {
+                        lastError = "SuperCollider rejected the compiled SynthDef";
+                        programLoadFailureCount.fetch_add (1, std::memory_order_relaxed);
+                        return false;
+                    }
+
+                    primeServerCommandQueueUnlocked();
                 }
             }
         }
@@ -3602,12 +3752,72 @@ public:
 
         pushSharedControls();
 
-        if (! scApi.worldRenderHostAudio (world,
-                                          numInputChannels > 0 ? interleavedInput.data() : nullptr,
-                                          interleavedOutput.data(),
-                                          paddedFrames,
-                                          numInputChannels,
-                                          numOutputChannels))
+        bool renderedOk = true;
+
+        if (scoreMode)
+        {
+            const auto stateGate = getParameterValueUnlocked ("hostStateGate", 1.0f);
+            const auto hasHostStateBeat = getParameterIndexUnlocked ("hostStateBeat") >= 0;
+            const auto hostStateBeat = hasHostStateBeat
+                                           ? static_cast<double> (getParameterValueUnlocked ("hostStateBeat", 0.0f))
+                                           : std::numeric_limits<double>::quiet_NaN();
+            const auto hostClockMoved = hasHostStateBeat
+                                        && (! std::isfinite (scoreLastHostStateBeat)
+                                            || std::abs (hostStateBeat - scoreLastHostStateBeat) > scoreBeatEpsilon);
+            const auto useStandaloneScoreClock = ! hasHostStateBeat || ! hostClockMoved;
+            const auto stateBeatAtBlockStart = useStandaloneScoreClock ? scoreStandaloneBeat : hostStateBeat;
+            const auto trackTempoBpm = static_cast<double> (getParameterValueUnlocked ("hostTrackTempoBpm",
+                                                                                        getParameterValueUnlocked ("hostTempoBpm", 120.0f)));
+            const auto beatPerFrame = trackTempoBpm > 0.0 && currentSampleRate > 0.0
+                                        ? trackTempoBpm / (60.0 * currentSampleRate)
+                                        : 0.0;
+
+            for (int offset = 0; offset < paddedFrames; offset += hostRenderQuantum)
+            {
+                if (stateGate > 0.5f && beatPerFrame > 0.0)
+                {
+                    const auto blockStartBeat = stateBeatAtBlockStart + static_cast<double> (offset) * beatPerFrame;
+                    const auto blockEndBeat = blockStartBeat + static_cast<double> (hostRenderQuantum) * beatPerFrame;
+                    sendScoreEventsForBeatRangeUnlocked (blockStartBeat, blockEndBeat, beatPerFrame);
+                }
+
+                const auto* inputStart = numInputChannels > 0
+                                           ? interleavedInput.data() + static_cast<size_t> (offset * inputChannels)
+                                           : nullptr;
+                auto* outputStart = interleavedOutput.data() + static_cast<size_t> (offset * numOutputChannels);
+
+                if (! scApi.worldRenderHostAudio (world,
+                                                  inputStart,
+                                                  outputStart,
+                                                  hostRenderQuantum,
+                                                  numInputChannels,
+                                                  numOutputChannels))
+                {
+                    renderedOk = false;
+                    break;
+                }
+
+                if (useStandaloneScoreClock && beatPerFrame > 0.0)
+                    scoreStandaloneBeat += static_cast<double> (hostRenderQuantum) * beatPerFrame;
+            }
+
+            if (! useStandaloneScoreClock)
+            {
+                scoreStandaloneBeat = stateBeatAtBlockStart + static_cast<double> (paddedFrames) * beatPerFrame;
+                scoreLastHostStateBeat = hostStateBeat;
+            }
+        }
+        else
+        {
+            renderedOk = scApi.worldRenderHostAudio (world,
+                                                     numInputChannels > 0 ? interleavedInput.data() : nullptr,
+                                                     interleavedOutput.data(),
+                                                     paddedFrames,
+                                                     numInputChannels,
+                                                     numOutputChannels);
+        }
+
+        if (! renderedOk)
         {
             renderExceptionCount.fetch_add (1, std::memory_order_relaxed);
             output.clear();
@@ -3715,6 +3925,7 @@ private:
         using WorldNewFn = World* (*) (WorldOptions*);
         using WorldCleanupFn = void (*) (World*, bool);
         using WorldSendPacketFn = bool (*) (World*, int, char*, ReplyFunc);
+        using WorldSendPacketWithSampleOffsetFn = bool (*) (World*, int, char*, ReplyFunc, int);
         using WorldRenderHostAudioFn = bool (*) (World*, const float*, float*, int, int, int);
 
         bool isLoaded() const noexcept { return libraryHandle != nullptr; }
@@ -3723,6 +3934,7 @@ private:
         WorldNewFn worldNew = nullptr;
         WorldCleanupFn worldCleanup = nullptr;
         WorldSendPacketFn worldSendPacket = nullptr;
+        WorldSendPacketWithSampleOffsetFn worldSendPacketWithSampleOffset = nullptr;
         WorldRenderHostAudioFn worldRenderHostAudio = nullptr;
     };
 
@@ -3731,6 +3943,7 @@ private:
         using InitialiseFn = bool (*) (const char*, char*, int);
         using ShutdownFn = void (*) ();
         using CompileSynthDefFn = bool (*) (const char*, const char*, const char*, char*, int);
+        using CompileScoreFn = bool (*) (const char*, const char*, double, double, char*, int);
 
         bool isLoaded() const noexcept { return libraryHandle != nullptr; }
 
@@ -3738,6 +3951,7 @@ private:
         InitialiseFn initialise = nullptr;
         ShutdownFn shutdown = nullptr;
         CompileSynthDefFn compileSynthDef = nullptr;
+        CompileScoreFn compileScore = nullptr;
     };
 
     struct SharedLanguageApiState
@@ -3745,6 +3959,14 @@ private:
         std::mutex mutex;
         LanguageApi api;
         bool shutdownRegistered = false;
+    };
+
+    struct ScoreEvent
+    {
+        double beat = 0.0;
+        uint64_t order = 0;
+        std::vector<char> packet;
+        int nodeIdByteOffset = -1;
     };
 
     static SharedLanguageApiState& getSharedLanguageApiState()
@@ -3763,9 +3985,8 @@ private:
             try { shared.api.shutdown(); } catch (...) {}
         }
 
-        if (shared.api.libraryHandle != nullptr)
-            dlclose (shared.api.libraryHandle);
-
+        // The embedded sclang bridge registers its own process-exit cleanup after
+        // successful initialisation. Keep the dylib resident so that handler remains valid.
         shared.api = {};
     }
 
@@ -3791,6 +4012,7 @@ private:
             const auto symbolsLoaded = loadSymbol (scApi.worldNew, "World_New", symbolError)
                                        && loadSymbol (scApi.worldCleanup, "World_Cleanup", symbolError)
                                        && loadSymbol (scApi.worldSendPacket, "World_SendPacket", symbolError)
+                                       && loadSymbol (scApi.worldSendPacketWithSampleOffset, "World_SendPacketWithSampleOffset", symbolError)
                                        && loadSymbol (scApi.worldRenderHostAudio, "World_RenderHostAudio", symbolError);
 
             if (symbolsLoaded)
@@ -3867,7 +4089,8 @@ private:
             juce::String symbolError;
             const auto symbolsLoaded = loadSymbolFrom (handle, candidateApi.initialise, "WeldSCLang_Initialise", symbolError)
                                        && loadSymbolFrom (handle, candidateApi.shutdown, "WeldSCLang_Shutdown", symbolError)
-                                       && loadSymbolFrom (handle, candidateApi.compileSynthDef, "WeldSCLang_CompileSynthDef", symbolError);
+                                       && loadSymbolFrom (handle, candidateApi.compileSynthDef, "WeldSCLang_CompileSynthDef", symbolError)
+                                       && loadSymbolFrom (handle, candidateApi.compileScore, "WeldSCLang_CompileScore", symbolError);
 
             if (symbolsLoaded)
             {
@@ -3922,6 +4145,12 @@ private:
         sharedControls.clear();
         interleavedInput.clear();
         interleavedOutput.clear();
+        scoreEvents.clear();
+        scorePacketScratch.clear();
+        scoreLoopBeats = 0.0;
+        scoreInitialEventCount = 0;
+        scoreStandaloneBeat = 0.0;
+        scoreLastHostStateBeat = std::numeric_limits<double>::quiet_NaN();
         currentSampleRate = 0.0;
         maxBlockSize = 0;
         numInputChannels = 0;
@@ -3987,6 +4216,110 @@ private:
         return true;
     }
 
+    bool compileSourceToScoreEvents (const juce::String& source, std::vector<ScoreEvent>& events, juce::String& error)
+    {
+        events.clear();
+        scoreLoopBeats = defaultScoreCompileDurationBeats;
+        scoreInitialEventCount = 0;
+
+        if (! langApi.isLoaded() || langApi.compileScore == nullptr)
+        {
+            error = "SuperCollider language score compiler is not loaded";
+            return false;
+        }
+
+        const auto tempFile = juce::File::createTempFile ("weld-sc-score.txt");
+        tempFile.deleteFile();
+
+        std::array<char, 16384> errorBuffer {};
+        if (! langApi.compileScore (source.toRawUTF8(),
+                                    tempFile.getFullPathName().toRawUTF8(),
+                                    defaultScoreCompileDurationBeats,
+                                    defaultScoreCompileTempo,
+                                    errorBuffer.data(),
+                                    static_cast<int> (errorBuffer.size())))
+        {
+            error = juce::String ("SuperCollider score source did not compile: ") + juce::String (errorBuffer.data());
+            tempFile.deleteFile();
+            return false;
+        }
+
+        juce::StringArray lines;
+        tempFile.readLines (lines);
+        tempFile.deleteFile();
+
+        uint64_t order = 0;
+        for (const auto& line : lines)
+        {
+            const auto trimmed = line.trim();
+            if (trimmed.isEmpty())
+                continue;
+
+            if (trimmed.startsWithChar ('#'))
+            {
+                const auto key = trimmed.upToFirstOccurrenceOf ("\t", false, false).trim();
+                const auto value = trimmed.fromFirstOccurrenceOf ("\t", false, false).trim();
+                if (key == "#loopBeats")
+                {
+                    const auto parsedLoopBeats = value.getDoubleValue();
+                    if (parsedLoopBeats > 0.0 && std::isfinite (parsedLoopBeats))
+                        scoreLoopBeats = parsedLoopBeats;
+                }
+                continue;
+            }
+
+            const auto timeText = trimmed.upToFirstOccurrenceOf ("\t", false, false).trim();
+            const auto bytesText = trimmed.fromFirstOccurrenceOf ("\t", false, false).trim();
+            if (timeText.isEmpty() || bytesText.isEmpty())
+                continue;
+
+            ScoreEvent event;
+            event.beat = timeText.getDoubleValue();
+            event.order = order++;
+
+            juce::StringArray byteTokens;
+            byteTokens.addTokens (bytesText, ",", "");
+            for (const auto& token : byteTokens)
+            {
+                const auto value = token.trim().getIntValue();
+                event.packet.push_back (static_cast<char> (value & 0xff));
+            }
+
+            event.nodeIdByteOffset = findScoreNodeIdByteOffset (event.packet);
+
+            if (! event.packet.empty() && std::isfinite (event.beat))
+                events.push_back (std::move (event));
+        }
+
+        std::stable_sort (events.begin(), events.end(), [] (const auto& a, const auto& b)
+        {
+            if (std::abs (a.beat - b.beat) > scoreBeatEpsilon)
+                return a.beat < b.beat;
+
+            return a.order < b.order;
+        });
+
+        while (scoreInitialEventCount < events.size()
+               && events[scoreInitialEventCount].beat < 0.0)
+        {
+            ++scoreInitialEventCount;
+        }
+
+        if (events.empty())
+        {
+            error = "SuperCollider score compiler produced no OSC events";
+            return false;
+        }
+
+        auto largestPacket = static_cast<size_t> (0);
+        for (const auto& event : events)
+            largestPacket = juce::jmax (largestPacket, event.packet.size());
+        scorePacketScratch.reserve (largestPacket);
+
+        error.clear();
+        return true;
+    }
+
     void applyParameterSlots (const std::vector<EmbeddedLanguageEngine::ParameterBinding>& bindings)
     {
         currentBindings = bindings;
@@ -4018,6 +4351,15 @@ private:
                 return static_cast<int> (i);
 
         return -1;
+    }
+
+    float getParameterValueUnlocked (const juce::String& name, float fallback) const noexcept
+    {
+        for (size_t i = 0; i < currentBindings.size(); ++i)
+            if (currentBindings[i].name == name)
+                return parameterValues[i].load (std::memory_order_relaxed);
+
+        return fallback;
     }
 
     static bool decodeOscHexProgram (const juce::String& programBody, std::vector<char>& packet, juce::String& error)
@@ -4075,6 +4417,81 @@ private:
         packet.push_back (static_cast<char> ((value >> 16) & 0xff));
         packet.push_back (static_cast<char> ((value >> 8) & 0xff));
         packet.push_back (static_cast<char> (value & 0xff));
+    }
+
+    static bool readInt32At (const std::vector<char>& packet, size_t offset, int32_t& value) noexcept
+    {
+        if (offset + 4 > packet.size())
+            return false;
+
+        value = (static_cast<int32_t> (static_cast<unsigned char> (packet[offset])) << 24)
+              | (static_cast<int32_t> (static_cast<unsigned char> (packet[offset + 1])) << 16)
+              | (static_cast<int32_t> (static_cast<unsigned char> (packet[offset + 2])) << 8)
+              |  static_cast<int32_t> (static_cast<unsigned char> (packet[offset + 3]));
+        return true;
+    }
+
+    static bool writeInt32At (std::vector<char>& packet, size_t offset, int32_t value) noexcept
+    {
+        if (offset + 4 > packet.size())
+            return false;
+
+        packet[offset]     = static_cast<char> ((value >> 24) & 0xff);
+        packet[offset + 1] = static_cast<char> ((value >> 16) & 0xff);
+        packet[offset + 2] = static_cast<char> ((value >> 8) & 0xff);
+        packet[offset + 3] = static_cast<char> (value & 0xff);
+        return true;
+    }
+
+    static bool readPaddedOscString (const std::vector<char>& packet, size_t& offset, juce::String& value)
+    {
+        if (offset >= packet.size())
+            return false;
+
+        const auto start = offset;
+        while (offset < packet.size() && packet[offset] != '\0')
+            ++offset;
+
+        if (offset >= packet.size())
+            return false;
+
+        value = juce::String::fromUTF8 (packet.data() + static_cast<ptrdiff_t> (start),
+                                        static_cast<int> (offset - start));
+        ++offset;
+
+        while ((offset % 4) != 0)
+            ++offset;
+
+        return offset <= packet.size();
+    }
+
+    static bool skipPaddedOscString (const std::vector<char>& packet, size_t& offset)
+    {
+        juce::String ignored;
+        return readPaddedOscString (packet, offset, ignored);
+    }
+
+    static int findScoreNodeIdByteOffset (const std::vector<char>& packet)
+    {
+        size_t offset = 0;
+        juce::String address;
+        if (! readPaddedOscString (packet, offset, address))
+            return -1;
+
+        juce::String typeTags;
+        if (! readPaddedOscString (packet, offset, typeTags))
+            return -1;
+
+        if (address == "/n_set")
+            return offset + 4 <= packet.size() ? static_cast<int> (offset) : -1;
+
+        if (address != "/s_new")
+            return -1;
+
+        if (! skipPaddedOscString (packet, offset))
+            return -1;
+
+        return offset + 4 <= packet.size() ? static_cast<int> (offset) : -1;
     }
 
     static void appendFloat32 (std::vector<char>& packet, float value)
@@ -4144,6 +4561,137 @@ private:
         addControl ("out", 0.0f);
 
         return buildOscMessage ("/s_new", arguments);
+    }
+
+    void sendScorePacketUnlocked (ScoreEvent& event, int sampleOffset, int64_t cycle)
+    {
+        if (event.packet.empty())
+            return;
+
+        auto* packetData = event.packet.data();
+        auto packetSize = static_cast<int> (event.packet.size());
+
+        if (cycle > 0
+            && cycle <= static_cast<int64_t> (std::numeric_limits<int32_t>::max()) / scoreNodeIdCycleStride
+            && event.nodeIdByteOffset >= 0)
+        {
+            const auto nodeOffset = cycle * scoreNodeIdCycleStride;
+            int32_t nodeId = 0;
+            if (nodeOffset <= static_cast<int64_t> (std::numeric_limits<int32_t>::max())
+                && readInt32At (event.packet, static_cast<size_t> (event.nodeIdByteOffset), nodeId))
+            {
+                const auto adjustedNodeId = static_cast<int64_t> (nodeId) + nodeOffset;
+                if (adjustedNodeId > 0 && adjustedNodeId <= static_cast<int64_t> (std::numeric_limits<int32_t>::max()))
+                {
+                    scorePacketScratch.assign (event.packet.begin(), event.packet.end());
+                    writeInt32At (scorePacketScratch,
+                                  static_cast<size_t> (event.nodeIdByteOffset),
+                                  static_cast<int32_t> (adjustedNodeId));
+                    packetData = scorePacketScratch.data();
+                    packetSize = static_cast<int> (scorePacketScratch.size());
+                }
+            }
+        }
+
+        const auto boundedOffset = juce::jlimit (0, hostRenderQuantum - 1, sampleOffset);
+        if (! scApi.worldSendPacketWithSampleOffset (world,
+                                                     packetSize,
+                                                     packetData,
+                                                     nullptr,
+                                                     boundedOffset))
+        {
+            renderExceptionCount.fetch_add (1, std::memory_order_relaxed);
+        }
+    }
+
+    void sendInitialScoreEventsUnlocked()
+    {
+        for (size_t i = 0; i < scoreInitialEventCount && i < scoreEvents.size(); ++i)
+        {
+            auto& event = scoreEvents[i];
+            if (event.packet.empty())
+                continue;
+
+            if (! scApi.worldSendPacket (world,
+                                         static_cast<int> (event.packet.size()),
+                                         event.packet.data(),
+                                         nullptr))
+            {
+                renderExceptionCount.fetch_add (1, std::memory_order_relaxed);
+            }
+        }
+    }
+
+    void primeServerCommandQueueUnlocked()
+    {
+        if (world == nullptr || ! scApi.isLoaded())
+            return;
+
+        constexpr int setupPrimeQuanta = 8;
+        const auto scratchChannels = juce::jmax (1, numOutputChannels);
+        std::vector<float> scratchOutput (static_cast<size_t> (hostRenderQuantum * scratchChannels), 0.0f);
+
+        for (int i = 0; i < setupPrimeQuanta; ++i)
+        {
+            std::fill (scratchOutput.begin(), scratchOutput.end(), 0.0f);
+            if (! scApi.worldRenderHostAudio (world,
+                                              nullptr,
+                                              scratchOutput.data(),
+                                              hostRenderQuantum,
+                                              0,
+                                              scratchChannels))
+            {
+                renderExceptionCount.fetch_add (1, std::memory_order_relaxed);
+                break;
+            }
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
+        }
+    }
+
+    void primeScoreSetupUnlocked()
+    {
+        if (scoreMode && scoreInitialEventCount != 0)
+            primeServerCommandQueueUnlocked();
+    }
+
+    void sendScoreEventsForBeatRangeUnlocked (double startBeat, double endBeat, double beatPerFrame)
+    {
+        if (scoreEvents.empty() || scoreInitialEventCount >= scoreEvents.size()
+            || scoreLoopBeats <= 0.0 || beatPerFrame <= 0.0
+            || ! std::isfinite (startBeat) || ! std::isfinite (endBeat)
+            || endBeat <= startBeat)
+        {
+            return;
+        }
+
+        const auto firstCycle = static_cast<int64_t> (std::floor (juce::jmax (0.0, startBeat) / scoreLoopBeats));
+        const auto lastCycle = static_cast<int64_t> (std::floor (juce::jmax (0.0, endBeat - scoreBeatEpsilon) / scoreLoopBeats));
+
+        for (auto cycle = firstCycle; cycle <= lastCycle; ++cycle)
+        {
+            const auto cycleStartBeat = static_cast<double> (cycle) * scoreLoopBeats;
+
+            for (size_t i = scoreInitialEventCount; i < scoreEvents.size(); ++i)
+            {
+                auto& event = scoreEvents[i];
+                if (event.beat < 0.0)
+                    continue;
+
+                if (event.beat >= scoreLoopBeats)
+                    break;
+
+                const auto absoluteBeat = cycleStartBeat + event.beat;
+                if (absoluteBeat + scoreBeatEpsilon < startBeat)
+                    continue;
+
+                if (absoluteBeat >= endBeat - scoreBeatEpsilon)
+                    break;
+
+                const auto sampleOffset = juce::roundToInt ((absoluteBeat - startBeat) / beatPerFrame);
+                sendScorePacketUnlocked (event, sampleOffset, cycle);
+            }
+        }
     }
 
     static void addLibraryCandidate (juce::StringArray& candidates, const juce::String& path)
@@ -4347,6 +4895,12 @@ private:
     std::vector<float> sharedControls;
     std::vector<float> interleavedInput;
     std::vector<float> interleavedOutput;
+    std::vector<ScoreEvent> scoreEvents;
+    std::vector<char> scorePacketScratch;
+    double scoreLoopBeats = 0.0;
+    double scoreStandaloneBeat = 0.0;
+    double scoreLastHostStateBeat = std::numeric_limits<double>::quiet_NaN();
+    size_t scoreInitialEventCount = 0;
     WorldOptions worldOptions;
     World* world = nullptr;
     Api scApi;
@@ -4359,6 +4913,11 @@ private:
     static constexpr const char* defaultSynthName = "weldMain";
     static constexpr int32_t defaultSynthNodeId = 1001;
     static constexpr float outputSafetyLimit = 0.98f;
+    static constexpr double defaultScoreCompileDurationBeats = 84.0;
+    static constexpr double defaultScoreCompileTempo = 1.0;
+    static constexpr double scoreBeatEpsilon = 1.0e-9;
+    static constexpr int64_t scoreNodeIdCycleStride = 100000;
+    bool scoreMode = false;
     std::atomic<bool> ready { false };
     std::atomic<uint64_t> silentProcessCount { 0 };
     std::atomic<uint64_t> oversizedBlockCount { 0 };
@@ -4487,6 +5046,7 @@ std::vector<EmbeddedLanguageEngine::Language> EmbeddedLanguageEngine::getSupport
         Language::faust,
         Language::csound,
         Language::supercollider,
+        Language::supercolliderScore,
         Language::rtcmix
     };
 }
@@ -4498,7 +5058,8 @@ juce::String EmbeddedLanguageEngine::getLanguageName (Language languageToName)
         case Language::chuck:    return "ChucK";
         case Language::faust:    return "Faust";
         case Language::csound:   return "Csound";
-        case Language::supercollider: return "SuperCollider";
+        case Language::supercollider: return "SuperCollider Function";
+        case Language::supercolliderScore: return "SuperCollider Score";
         case Language::rtcmix:   return "RTcmix";
     }
 
@@ -4524,13 +5085,16 @@ juce::String EmbeddedLanguageEngine::getLanguageBuildStatus (Language languageTo
 
 #if WELD_HAS_SUPERCOLLIDER
     if (languageToReport == Language::supercollider)
-        return "SuperCollider backend is built in with embedded libscsynth host-pulled audio and no external server";
+        return "SuperCollider Function backend is built in with embedded libscsynth host-pulled audio and no external server";
+
+    if (languageToReport == Language::supercolliderScore)
+        return "SuperCollider Score backend is built in with embedded libscsynth and Alchemy-clocked OSC score scheduling";
 #endif
 
     if (isLanguageBuiltIn (languageToReport))
         return getLanguageName (languageToReport) + " backend is built in";
 
-    if (languageToReport == Language::supercollider)
+    if (languageToReport == Language::supercollider || languageToReport == Language::supercolliderScore)
         return "SuperCollider backend is declared but not built in; it requires an in-process scsynth host-buffer backend, not an external server";
 
     return getLanguageName (languageToReport)
@@ -4558,7 +5122,7 @@ bool EmbeddedLanguageEngine::isLanguageBuiltIn (Language languageToCheck) noexce
 #endif
 
 #if WELD_HAS_SUPERCOLLIDER
-    if (languageToCheck == Language::supercollider)
+    if (languageToCheck == Language::supercollider || languageToCheck == Language::supercolliderScore)
         return true;
 #endif
 
@@ -4672,7 +5236,10 @@ std::unique_ptr<EmbeddedLanguageEngine::Runtime> EmbeddedLanguageEngine::createR
 
 #if WELD_HAS_SUPERCOLLIDER
     if (languageToCreate == Language::supercollider)
-        return std::make_unique<SuperColliderRuntime>();
+        return std::make_unique<SuperColliderRuntime> (false);
+
+    if (languageToCreate == Language::supercolliderScore)
+        return std::make_unique<SuperColliderRuntime> (true);
 #endif
 
     return std::make_unique<UnavailableRuntime> (languageToCreate);

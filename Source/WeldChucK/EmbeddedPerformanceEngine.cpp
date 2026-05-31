@@ -986,6 +986,13 @@ int64_t EmbeddedPerformanceEngine::nextBoundaryAfterUnlocked (int64_t frame) con
             }
     }
 
+    for (const auto& event : tempoMap)
+    {
+        const auto eventFrame = beatToFrameUnlocked (event.beat);
+        if (eventFrame > frame)
+            next = juce::jmin (next, eventFrame);
+    }
+
     if (sequenceEndFrame > frame)
         next = juce::jmin (next, sequenceEndFrame);
 

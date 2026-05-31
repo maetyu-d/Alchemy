@@ -122,6 +122,12 @@ class TrackApi
     fun void clear(float stateIndex, float trackIndex) { weldSend(31, stateIndex, trackIndex, 0, 0, 0, 0); }
     fun void mute(float stateIndex, float trackIndex, float isMuted) { weldSend(32, stateIndex, trackIndex, isMuted, 0, 0, 0); }
     fun void solo(float stateIndex, float trackIndex, float isSoloed) { weldSend(33, stateIndex, trackIndex, isSoloed, 0, 0, 0); }
+
+    fun void type(float stateIndex, float trackIndex, string trackType)
+    {
+        trackType => weldScoreText0;
+        weldSend(34, stateIndex, trackIndex, 0, 0, 0, 0);
+    }
 }
 
 ScoreApi score;

@@ -7,7 +7,7 @@
   "globalPhaseBeats": 0,
   "scheduledStopBeat": -1,
   "loopPlayback": true,
-  "chuckScoreScript": "score.clear();\ntempo(210);\nmeter(4, 4);\nstate.add(\"60Hz Room\", 32, 2);\ntrack.add(1, \"ChucK 60Hz gabber kick\", \"chuck\");\ntrack.gain(1, 1, 0.50);\ntrack.add(1, \"Offbeat hoover stab\", \"chuck\");\ntrack.gain(1, 2, 0.36);\ntrack.add(1, \"Csound hard edge\", \"csound\");\ntrack.gain(1, 3, 0.30);\ntrack.add(1, \"Sub pressure\", \"chuck\");\ntrack.gain(1, 4, 0.34);\nstate.add(\"Hoover Lift\", 32, 4);\ntrack.add(2, \"SC gabber hoover\", \"supercollider\");\ntrack.gain(2, 1, 0.34);\ntrack.add(2, \"ChucK detuned hoover\", \"chuck\");\ntrack.gain(2, 2, 0.30);\ntrack.add(2, \"Syncopated heavy bass\", \"chuck\");\ntrack.gain(2, 3, 0.36);\ntrack.add(2, \"ChucK siren pin\", \"chuck\");\ntrack.gain(2, 4, 0.22);\nstate.add(\"Rumble Break\", 48, 4);\ntrack.add(3, \"RTcmix 60Hz rumble\", \"rtcmix\");\ntrack.gain(3, 1, 0.44);\ntrack.add(3, \"ChucK pedal hammer\", \"chuck\");\ntrack.gain(3, 2, 0.28);\ntrack.add(3, \"ChucK broken kick\", \"chuck\");\ntrack.gain(3, 3, 0.38);\ntrack.add(3, \"ChucK low hoover\", \"chuck\");\ntrack.gain(3, 4, 0.28);\nstate.add(\"Strobe Coda\", 24, 2);\ntrack.add(4, \"ChucK coda stab\", \"chuck\");\ntrack.gain(4, 1, 0.40);\ntrack.add(4, \"ChucK coda hoover\", \"chuck\");\ntrack.gain(4, 2, 0.34);\ntrack.add(4, \"Csound closing rave\", \"csound\");\ntrack.gain(4, 3, 0.34);\ntrack.add(4, \"ChucK floor siren\", \"chuck\");\ntrack.gain(4, 4, 0.30);\nstate.connect(1, 2, 70);\nstate.connect(1, 3, 30);\nstate.connect(2, 3, 50);\nstate.connect(2, 4, 50);\nstate.connect(3, 4, 1);\nplay();",
+  "chuckScoreScript": "score.clear();\ntempo(210);\nmeter(4, 4);\nstate.add(\"60Hz Gabber Rave 1995\", 84, 0);\ntrack.add(1, \"Exact SC gabber rave\", \"supercollider-score\");\ntrack.gain(1, 1, 1.00);\nstate.add(\"Hoover Lift\", 32, 4);\ntrack.add(2, \"SC gabber hoover\", \"supercollider\");\ntrack.gain(2, 1, 0.34);\ntrack.add(2, \"ChucK detuned hoover\", \"chuck\");\ntrack.gain(2, 2, 0.30);\ntrack.add(2, \"Syncopated heavy bass\", \"chuck\");\ntrack.gain(2, 3, 0.36);\ntrack.add(2, \"ChucK siren pin\", \"chuck\");\ntrack.gain(2, 4, 0.22);\nstate.add(\"Rumble Break\", 48, 4);\ntrack.add(3, \"RTcmix 60Hz rumble\", \"rtcmix\");\ntrack.gain(3, 1, 0.44);\ntrack.add(3, \"ChucK pedal hammer\", \"chuck\");\ntrack.gain(3, 2, 0.28);\ntrack.add(3, \"ChucK broken kick\", \"chuck\");\ntrack.gain(3, 3, 0.38);\ntrack.add(3, \"ChucK low hoover\", \"chuck\");\ntrack.gain(3, 4, 0.28);\nstate.add(\"Strobe Coda\", 24, 2);\ntrack.add(4, \"ChucK coda stab\", \"chuck\");\ntrack.gain(4, 1, 0.40);\ntrack.add(4, \"ChucK coda hoover\", \"chuck\");\ntrack.gain(4, 2, 0.34);\ntrack.add(4, \"Csound closing rave\", \"csound\");\ntrack.gain(4, 3, 0.34);\ntrack.add(4, \"ChucK floor siren\", \"chuck\");\ntrack.gain(4, 4, 0.30);\nstate.connect(1, 2, 70);\nstate.connect(1, 3, 30);\nstate.connect(2, 3, 50);\nstate.connect(2, 4, 50);\nstate.connect(3, 4, 1);\nplay();",
   "tempoMap": [],
   "timeSignatureMap": [],
   "phaseRotationMap": [],
@@ -22,9 +22,9 @@
   ],
   "states": [
     {
-      "name": "60Hz Room",
-      "durationBeats": 32,
-      "tailBeats": 2,
+      "name": "60Hz Gabber Rave 1995",
+      "durationBeats": 84,
+      "tailBeats": 0,
       "canvasX": 70,
       "canvasY": 160,
       "transitions": [
@@ -39,59 +39,17 @@
       ],
       "tracks": [
         {
-          "name": "ChucK 60Hz gabber kick",
-          "language": "chuck",
+          "name": "Exact SC gabber rave",
+          "language": "supercollider-score",
           "sync": true,
           "tempo": 210,
           "timeSigNumerator": 4,
           "timeSigDenominator": 4,
           "phase": 0,
-          "gain": 0.5,
+          "gain": 1,
           "muted": false,
           "soloed": false,
-          "code": "SinOsc k => Gain g => dac;\nwhile (true) {\n    60 => k.freq;\n    0.82 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    32::ms => now;\n    0 => g.gain;\n    82::ms => now;\n}",
-          "gainEvents": []
-        },
-        {
-          "name": "Offbeat hoover stab",
-          "language": "chuck",
-          "sync": true,
-          "tempo": 210,
-          "timeSigNumerator": 4,
-          "timeSigDenominator": 4,
-          "phase": 0,
-          "gain": 0.36,
-          "muted": false,
-          "soloed": false,
-          "code": "SawOsc a => Gain mix => dac;\nSawOsc b => mix;\n0.22 => mix.gain;\nwhile (true) {\n    hostFreq * 1.5 => a.freq;\n    hostFreq * 1.505 => b.freq;\n    55::ms => now;\n    0.02 => mix.gain;\n    95::ms => now;\n    0.22 * hostGain * hostStateGain * hostTrackGain => mix.gain;\n}",
-          "gainEvents": []
-        },
-        {
-          "name": "Csound hard edge",
-          "language": "csound",
-          "sync": true,
-          "tempo": 210,
-          "timeSigNumerator": 4,
-          "timeSigDenominator": 4,
-          "phase": 0,
-          "gain": 0.3,
-          "muted": false,
-          "soloed": false,
-          "code": "giSine ftgen 1, 0, 4096, 10, 1\ninstr 1\n kfreq chnget \"hostFreq\"\n kgain chnget \"hostGain\"\n a1 oscili kgain * 0.28, kfreq * 5, giSine\n a2 tanh(a1 * 7)\n outs a2, a2\nendin",
-          "gainEvents": []
-        },
-        {
-          "name": "Sub pressure",
-          "language": "chuck",
-          "sync": true,
-          "tempo": 210,
-          "timeSigNumerator": 4,
-          "timeSigDenominator": 4,
-          "phase": 0,
-          "gain": 0.34,
-          "muted": false,
-          "soloed": false,
-          "code": "SinOsc b => Gain g => dac;\n[36, 36, 43, 36, 48, 36, 34, 36] @=> int notes[];\n0 => int i;\nwhile (true) {\n    Std.mtof(notes[i % notes.cap()]) => b.freq;\n    0.32 * hostGain * hostStateGain * hostTrackGain => g.gain;\n    70::ms => now;\n    0 => g.gain;\n    45::ms => now;\n    i++;\n}",
+          "code": "// 60Hz Gabber Rave 1995\n(\nSynthDef(\\gabberkick, {\n    var snd, freq, high, lfo;\n    freq = \\freq.kr(440) * (Env.perc(0.001, 0.08, curve: -1).ar * 48 * \\bend.kr(1)).midiratio;\n    snd = Saw.ar(freq);\n    snd = (snd * 100).tanh + ((snd.sign - snd) * -8.dbamp);\n    high = HPF.ar(snd, 300);\n    lfo = SinOsc.ar(8, [0, 0.5pi]).range(0, 0.01);\n    high = high.dup(2) + (DelayC.ar(high, 0.01, lfo) * -2.dbamp);\n    snd = LPF.ar(snd, 100).dup(2) + high;\n    snd = RLPF.ar(snd, 7000, 2);\n    snd = BPeakEQ.ar(snd, \\ffreq.kr(3000) * XLine.kr(1, 0.8, 0.3), 0.5, 15);\n    snd = snd * Env.asr(0.001, 1, 0.05).ar(2, \\gate.kr(1));\n    Out.ar(\\out.kr(0), snd * \\amp.kr(0.1));\n}).add;\n\nSynthDef(\\hoover, {\n    var snd, freq, bw, delay, decay;\n    freq = \\freq.kr(440);\n    freq = freq * Env([-5, 6, 0], [0.1, 1.7], [\\lin, -4]).kr.midiratio;\n    bw = 1.035;\n    snd = { DelayN.ar(Saw.ar(freq * ExpRand(bw, 1 / bw)) + Saw.ar(freq * 0.5 * ExpRand(bw, 1 / bw)), 0.01, Rand(0, 0.01)) }.dup(20);\n    snd = (Splay.ar(snd) * 3).atan;\n    snd = snd * Env.asr(0.01, 1.0, 1.0).kr(0, \\gate.kr(1));\n    snd = FreeVerb2.ar(snd[0], snd[1], 0.3, 0.9);\n    snd = snd * Env.asr(0, 1.0, 4, 6).kr(2, \\gate.kr(1));\n    Out.ar(\\out.kr(0), snd * \\amp.kr(0.1));\n}).add;\n)\n\n(\nvar durations;\ndurations = [1, 1, 1, 1, 3/4, 1/4, 1/2, 3/4, 1/4, 1/2];\nPpar([\n    Pbind(*[\n        instrument: \\gabberkick,\n        amp: -23.dbamp,\n        freq: 60,\n        legato: 0.8,\n        ffreq: Pseq((0..(durations.size * 4 - 1)).normalize, inf).linexp(0, 1, 100, 4000),\n        dur: Pseq(durations, inf),\n        bend: Pfuncn({ |x| if(x < (1/2), 0.4, 1) }, inf) <> Pkey(\\dur),\n    ]),\n    Pbind(*[\n        instrument: \\hoover,\n        amp: -20.dbamp,\n        midinote: 74,\n        dur: durations.sum * 2,\n        sustain: 7,\n    ])\n]).play(TempoClock(210 / 60));\n)",
           "gainEvents": []
         }
       ]

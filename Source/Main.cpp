@@ -1897,6 +1897,108 @@ process = (no.noise : fi.lowpass(2, 600 + (hostFreq * 3))) * hostGain * 0.10 * h
     RLPF.ar(pulse, cutoff, 0.25) * gain * 0.32 * stateGain * trackGain
 }
 )supercollider" },
+        { EmbeddedLanguageEngine::Language::supercolliderScore,
+          "SuperCollider Score SynthDef/Pbind",
+          "https://doc.sccode.org/Classes/Pbind.html",
+          R"supercollider(
+(
+var def, pattern;
+def = SynthDef(\alchemyScoreTest, { |out = 0, freq = 220, amp = 0.12, sustain = 0.1|
+    var env = Env.perc(0.001, sustain).ar(doneAction: 2);
+    Out.ar(out, (SinOsc.ar(freq) * env * amp).dup);
+});
+pattern = Pbind(
+    \instrument, \alchemyScoreTest,
+    \dur, Pseq([0.25, 0.25, 0.5], inf),
+    \freq, Pseq([220, 330, 440, 550], inf),
+    \amp, 0.16,
+    \sustain, 0.12
+);
+	(synthDefs: [def], pattern: pattern, tempo: 2, duration: 8)
+	)
+	)supercollider" },
+        { EmbeddedLanguageEngine::Language::supercolliderScore,
+          "SuperCollider Score gabber SynthDef/Ppar",
+          "https://supercollider.github.io/examples",
+          R"supercollider(
+// 60Hz Gabber Rave 1995
+(
+SynthDef(\gabberkick, {
+    var snd, freq, high, lfo;
+    freq = \freq.kr(440) * (Env.perc(0.001, 0.08, curve: -1).ar * 48 * \bend.kr(1)).midiratio;
+    snd = Saw.ar(freq);
+    snd = (snd * 100).tanh + ((snd.sign - snd) * -8.dbamp);
+    high = HPF.ar(snd, 300);
+    lfo = SinOsc.ar(8, [0, 0.5pi]).range(0, 0.01);
+    high = high.dup(2) + (DelayC.ar(high, 0.01, lfo) * -2.dbamp);
+    snd = LPF.ar(snd, 100).dup(2) + high;
+    snd = RLPF.ar(snd, 7000, 2);
+    snd = BPeakEQ.ar(snd, \ffreq.kr(3000) * XLine.kr(1, 0.8, 0.3), 0.5, 15);
+    snd = snd * Env.asr(0.001, 1, 0.05).ar(2, \gate.kr(1));
+    Out.ar(\out.kr(0), snd * \amp.kr(0.1));
+}).add;
+
+SynthDef(\hoover, {
+    var snd, freq, bw, delay, decay;
+    freq = \freq.kr(440);
+    freq = freq * Env([-5, 6, 0], [0.1, 1.7], [\lin, -4]).kr.midiratio;
+    bw = 1.035;
+    snd = { DelayN.ar(Saw.ar(freq * ExpRand(bw, 1 / bw)) + Saw.ar(freq * 0.5 * ExpRand(bw, 1 / bw)), 0.01, Rand(0, 0.01)) }.dup(20);
+    snd = (Splay.ar(snd) * 3).atan;
+    snd = snd * Env.asr(0.01, 1.0, 1.0).kr(0, \gate.kr(1));
+    snd = FreeVerb2.ar(snd[0], snd[1], 0.3, 0.9);
+    snd = snd * Env.asr(0, 1.0, 4, 6).kr(2, \gate.kr(1));
+    Out.ar(\out.kr(0), snd * \amp.kr(0.1));
+}).add;
+)
+
+(
+var durations;
+durations = [1, 1, 1, 1, 3/4, 1/4, 1/2, 3/4, 1/4, 1/2];
+Ppar([
+    Pbind(*[
+        instrument: \gabberkick,
+        amp: -23.dbamp,
+        freq: 60,
+        legato: 0.8,
+        ffreq: Pseq((0..(durations.size * 4 - 1)).normalize, inf).linexp(0, 1, 100, 4000),
+        dur: Pseq(durations, inf),
+        bend: Pfuncn({ |x| if(x < (1/2), 0.4, 1) }, inf) <> Pkey(\dur),
+    ]),
+    Pbind(*[
+        instrument: \hoover,
+        amp: -20.dbamp,
+        midinote: 74,
+        dur: durations.sum * 2,
+        sustain: 7,
+    ])
+]).play(TempoClock(210 / 60));
+)
+	)supercollider" },
+        { EmbeddedLanguageEngine::Language::supercolliderScore,
+          "SuperCollider Score chord Pattern",
+          "https://doc.sccode.org/Classes/Pbind.html",
+          R"supercollider(
+	(
+	var def, pattern;
+	def = SynthDef(\alchemyScoreChord, { |out = 0, freq = 440, amp = 0.08, sustain = 0.2, pan = 0, gate = 1|
+	    var env = Env.asr(0.005, 1.0, 0.08).ar(doneAction: 2, gate: gate);
+	    Out.ar(out, Pan2.ar(Saw.ar(freq) * env * amp, pan));
+	});
+	pattern = Pbind(
+	    \instrument, \alchemyScoreChord,
+	    \scale, Scale.minorPentatonic,
+	    \degree, Pseq([[0, 2, 4], [3, 5, 7], [4, 6, 8], [2, 4, 6]], inf),
+	    \octave, Pseq([4, 4, 5, 4], inf),
+	    \dur, 0.5,
+	    \legato, 0.65,
+	    \strum, 0.03,
+	    \db, -20,
+	    \pan, Pseq([-0.45, 0.3, -0.1, 0.45], inf)
+	);
+	(synthDefs: [def], pattern: pattern, loopBeats: 8)
+	)
+	)supercollider" },
         { EmbeddedLanguageEngine::Language::rtcmix,
           "RTcmix maketable/WAVETABLE score",
           "https://rtcmix.org/reference/instruments/WAVETABLE.html",

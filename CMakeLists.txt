@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(Alchemy VERSION 0.1.6 LANGUAGES C CXX)
+project(Alchemy VERSION 0.1.7 LANGUAGES C CXX)
 enable_testing()
 
 set(CMAKE_CXX_STANDARD 17)
@@ -335,6 +335,7 @@ target_link_libraries(AlchemyGui
     PRIVATE
         Alchemy::Engine
         juce::juce_audio_devices
+        juce::juce_audio_processors
         juce::juce_data_structures
         juce::juce_events
         juce::juce_gui_basics

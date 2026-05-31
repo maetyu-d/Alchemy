@@ -18,6 +18,7 @@ public:
         faust,
         csound,
         supercollider,
+        supercolliderScore,
         rtcmix
     };
 

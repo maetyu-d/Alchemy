@@ -39,6 +39,7 @@ enum class CommandId
     trackClear = 31,
     trackMute = 32,
     trackSolo = 33,
+    trackType = 34,
     mixer = 40
 };
 
